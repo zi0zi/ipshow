@@ -1,0 +1,12 @@
+<Application x:Class="IpShow.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="PanelBackground" Color="#CC1D1D1D" />
+    <SolidColorBrush x:Key="TextPrimary" Color="#F5F5F5" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#B9B9B9" />
+    <SolidColorBrush x:Key="Accent" Color="#57C1FF" />
+    <DropShadowEffect x:Key="BannerShadow" BlurRadius="18" ShadowDepth="4" Opacity="0.35" />
+  </Application.Resources>
+</Application>
