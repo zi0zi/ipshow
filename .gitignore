@@ -1,0 +1,139 @@
+# ================================
+#   C# WPF PROJECT .gitignore
+#   Support: .NET Framework / .NET Core / .NET 5+
+# ================================
+
+# Build folders
+bin/
+obj/
+
+# WPF generated files
+*.g.cs
+*.g.i.cs
+*.baml
+*.generated.cs
+*.resources
+
+# Local user settings
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio folder
+.vs/
+
+# Logs and debug
+*.log
+*.pdb
+*.mdb
+*.dll
+*.exe
+
+# NuGet
+*.nupkg
+*.snupkg
+# Packages folder (do not delete if using package restore)
+packages/
+# Uncomment if you use package restore and don't want to commit packages
+# packages/**
+
+# Cache, database, and tool artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+*.cache/
+*.tmp/
+
+# IDE specific
+*.aps
+*.psess
+*.vspx
+*.vsp
+*.pidb
+*.scc
+
+# Rider / JetBrains
+.idea/
+*.iml
+
+# ReSharper
+_ReSharper*/
+*.DotSettings.user
+
+# Test results
+TestResults/
+*.coverage
+*.coveragexml
+
+# Publish output files
+publish/
+*.publishsettings
+
+# Backup files
+*.bak
+*.old
+*.orig
+
+# Others
+Thumbs.db
+Desktop.ini
+
+# Node.js dependencies
+node_modules/
+.kiro/
+
+# ================================
+#   Environment / SDK / User Home
+# ================================
+.dotnet/
+.dotnet-home/
+.dotnet_home/
+.home/
+
+# ================================
+#   Environment variables
+# ================================
+.env
+.env.*
+
+# ================================
+#   AI / Tool specific
+# ================================
+.gemini/
+.kiro/
+
+# ================================
+#   Visual Studio Code (optional)
+#   Keep only if team agreed
+# ================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+
+# ================================
+#   OS generated files
+# ================================
+.DS_Store
+.AppleDouble
+.LSOverride
+ehthumbs.db
+Icon?
+
+# ================================
+#   .NET / MSBuild artifacts (extra safety)
+# ================================
+*.ilk
+*.exp
+*.iobj
+*.ipdb
+*.rsp
+*.metaproj
+*.metaproj.tmp
+
+# ================================
+# End of file
+# ================================
