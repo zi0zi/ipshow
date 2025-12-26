@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "qPuIuZPVz6Q=",
+  "dgSpecHash": "5jpuVQLjexk=",
   "success": true,
   "projectFilePath": "D:\\ipshow\\IpShow\\IpShow.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\Hi\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.22\\microsoft.net.illink.tasks.8.0.22.nupkg.sha512"
+  ],
   "logs": []
 }
