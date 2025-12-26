@@ -31,7 +31,7 @@
         <MenuItem Header="30s" IsCheckable="True" Name="Refresh30Menu" Tag="30" Click="RefreshIntervalMenu_Click" />
         <MenuItem Header="60s" IsCheckable="True" Name="Refresh60Menu" Tag="60" Click="RefreshIntervalMenu_Click" />
       </MenuItem>
-      <MenuItem Header="Refresh Now" Click="RefreshNowMenu_Click" />
+      <MenuItem Header="Force Refresh" Click="RefreshNowMenu_Click" />
       <MenuItem Header="Exit" Click="ExitMenu_Click" />
     </ContextMenu>
   </Window.ContextMenu>
@@ -58,7 +58,9 @@
                    FontFamily="Bahnschrift"
                    FontSize="12"
                    Effect="{StaticResource TextGlow}"
-                   TextTrimming="CharacterEllipsis">
+                   TextTrimming="CharacterEllipsis"
+                   Cursor="Hand"
+                   MouseLeftButtonDown="CurrentIpText_MouseLeftButtonDown">
           <Run Text="IP: " Foreground="{Binding CurrentPrefixBrush, Mode=OneWay}" />
           <Run Text="{Binding CurrentIpText, Mode=OneWay}" />
           <Run Text=" " />

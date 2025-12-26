@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
+using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
@@ -9,6 +12,8 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
 using System.Windows.Media;
+using MaxMind.GeoIP2;
+using MaxMind.GeoIP2.Exceptions;
 using Microsoft.Win32;
 
 namespace IpShow;
@@ -22,6 +27,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string SettingsRegistryKey = @"Software\IpShow";
     private const string RefreshIntervalValueName = "RefreshIntervalSeconds";
     private const int DefaultRefreshSeconds = 10;
+    private static readonly string GeoCityDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
+    private static readonly string GeoCountryDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-Country.mmdb");
+    private static readonly Lazy<DatabaseReader?> GeoCityReader = new(() => CreateGeoReader(GeoCityDbPath));
+    private static readonly Lazy<DatabaseReader?> GeoCountryReader = new(() => CreateGeoReader(GeoCountryDbPath));
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromSeconds(6)
@@ -111,6 +120,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             Http.DefaultRequestHeaders.UserAgent.ParseAdd("IpShow/1.0");
         }
+        if (Http.DefaultRequestHeaders.CacheControl is null)
+        {
+            Http.DefaultRequestHeaders.CacheControl = new CacheControlHeaderValue
+            {
+                NoCache = true,
+                NoStore = true,
+                MaxAge = TimeSpan.Zero
+            };
+        }
 
         _timer = new DispatcherTimer
         {
@@ -127,6 +145,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
 
         NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
+        NetworkChange.NetworkAvailabilityChanged += NetworkChange_NetworkAvailabilityChanged;
     }
 
     protected override async void OnContentRendered(EventArgs e)
@@ -138,6 +157,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     protected override void OnClosed(EventArgs e)
     {
         NetworkChange.NetworkAddressChanged -= NetworkChange_NetworkAddressChanged;
+        NetworkChange.NetworkAvailabilityChanged -= NetworkChange_NetworkAvailabilityChanged;
         base.OnClosed(e);
     }
 
@@ -158,7 +178,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var data = await FetchIpDataAsync();
             if (data.Ip is { Length: > 0 } ip)
             {
-                var location = BuildLocationText(data.CountryCode, data.Region);
+                var location = ResolveLocationText(ip, data.Region);
                 if (!string.Equals(CurrentIpText, ip, StringComparison.OrdinalIgnoreCase)
                     && CurrentIpText != PlaceholderIp)
                 {
@@ -173,12 +193,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             }
             else
             {
-                SetDisconnectedIfEmpty();
+                HandleDisconnected();
             }
         }
         catch
         {
-            SetDisconnectedIfEmpty();
+            HandleDisconnected();
         }
         finally
         {
@@ -194,10 +214,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task<IpLookupResult> FetchIpDataAsync()
     {
-        var ipInfo = await TryFetchIpInfoAsync();
-        if (!string.IsNullOrWhiteSpace(ipInfo.Ip))
+        var ipOnly = await TryFetchIpifyAsync();
+        if (!string.IsNullOrWhiteSpace(ipOnly.Ip))
         {
-            return ipInfo;
+            return ipOnly;
         }
 
         var ipWho = await TryFetchIpWhoAsync();
@@ -206,10 +226,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return ipWho;
         }
 
-        var ipOnly = await TryFetchIpifyAsync();
-        if (!string.IsNullOrWhiteSpace(ipOnly.Ip))
+        var ipInfo = await TryFetchIpInfoAsync();
+        if (!string.IsNullOrWhiteSpace(ipInfo.Ip))
         {
-            return ipOnly;
+            return ipInfo;
         }
 
         return IpLookupResult.Empty;
@@ -219,7 +239,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var json = await Http.GetStringAsync("https://ipinfo.io/json");
+            var json = await Http.GetStringAsync(BuildNoCacheUrl("https://ipinfo.io/json"));
             var data = JsonSerializer.Deserialize<IpInfoResponse>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -242,7 +262,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var json = await Http.GetStringAsync("https://ipwho.is/");
+            var json = await Http.GetStringAsync(BuildNoCacheUrl("https://ipwho.is/"));
             var data = JsonSerializer.Deserialize<IpWhoResponse>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -265,7 +285,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            var json = await Http.GetStringAsync("https://api.ipify.org?format=json");
+            var json = await Http.GetStringAsync(BuildNoCacheUrl("https://api.ipify.org?format=json"));
             var data = JsonSerializer.Deserialize<IpifyResponse>(json, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
@@ -284,10 +304,103 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private string BuildLocationText(string? _, string? regionRaw)
+    private string ResolveLocationText(string ip, string? regionRaw)
     {
+        var localRegion = TryResolveRegionFromLocalDb(ip);
+        if (!string.IsNullOrWhiteSpace(localRegion))
+        {
+            return localRegion;
+        }
+
         var region = NormalizeLocation(regionRaw);
         return region == "-" ? PlaceholderLocation : region;
+    }
+
+    private static string BuildNoCacheUrl(string url)
+    {
+        var separator = url.Contains('?') ? "&" : "?";
+        return $"{url}{separator}t={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+    }
+
+    private static DatabaseReader? CreateGeoReader(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? new DatabaseReader(path) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryResolveRegionFromLocalDb(string ip)
+    {
+        if (!IPAddress.TryParse(ip, out var address))
+        {
+            return null;
+        }
+
+        var city = TryResolveRegionFromCityDb(address);
+        if (!string.IsNullOrWhiteSpace(city))
+        {
+            return city;
+        }
+
+        var country = TryResolveCountryFromDb(address);
+        return string.IsNullOrWhiteSpace(country) ? null : country;
+    }
+
+    private static string? TryResolveRegionFromCityDb(IPAddress address)
+    {
+        if (GeoCityReader.Value is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var response = GeoCityReader.Value.City(address);
+            var region = NormalizeLocation(response?.MostSpecificSubdivision?.Name);
+            if (region != "-")
+            {
+                return region;
+            }
+
+            var city = NormalizeLocation(response?.City?.Name);
+            return city != "-" ? city : null;
+        }
+        catch (AddressNotFoundException)
+        {
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryResolveCountryFromDb(IPAddress address)
+    {
+        if (GeoCountryReader.Value is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var response = GeoCountryReader.Value.Country(address);
+            var country = NormalizeLocation(response?.Country?.Name);
+            return country == "-" ? null : country;
+        }
+        catch (AddressNotFoundException)
+        {
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string NormalizeLocation(string? value)
@@ -300,9 +413,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return value.Trim().Equals("unknown", StringComparison.OrdinalIgnoreCase) ? "-" : value.Trim();
     }
 
-    private void SetDisconnectedIfEmpty()
+    private void HandleDisconnected()
     {
-        if (CurrentIpText == PlaceholderIp)
+        if (CurrentIpText != PlaceholderIp)
+        {
+            _previousIp = CurrentIpText;
+            _previousLocation = CurrentLocationText;
+            CurrentIpText = PlaceholderIp;
+            CurrentLocationText = PlaceholderLocation;
+            UpdatePreviousLine();
+        }
+        else
         {
             CurrentLocationText = PlaceholderLocation;
         }
@@ -336,7 +457,35 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     }
 
     private void NetworkChange_NetworkAddressChanged(object? sender, EventArgs e)
-        => Dispatcher.InvokeAsync(RefreshAsync);
+        => _ = Dispatcher.InvokeAsync(() => RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1)));
+
+    private void NetworkChange_NetworkAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e)
+    {
+        if (e.IsAvailable)
+        {
+            _ = Dispatcher.InvokeAsync(() => RefreshWithRetriesAsync(3, TimeSpan.FromSeconds(2)));
+            return;
+        }
+
+        Dispatcher.Invoke(HandleDisconnected);
+    }
+
+    private async Task RefreshWithRetriesAsync(int attempts, TimeSpan delay)
+    {
+        for (var i = 0; i < attempts; i++)
+        {
+            await RefreshAsync();
+            if (CurrentIpText != PlaceholderIp)
+            {
+                return;
+            }
+
+            if (i < attempts - 1)
+            {
+                await Task.Delay(delay);
+            }
+        }
+    }
 
     private void AddressLink_Click(object sender, RoutedEventArgs e)
     {
@@ -397,6 +546,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void RefreshNowMenu_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
     private void ExitMenu_Click(object sender, RoutedEventArgs e) => Close();
+
+    private async void CurrentIpText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => await RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1));
 
     private void RefreshIntervalMenu_Click(object sender, RoutedEventArgs e)
     {
