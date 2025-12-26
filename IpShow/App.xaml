@@ -4,9 +4,12 @@
              StartupUri="MainWindow.xaml">
   <Application.Resources>
     <SolidColorBrush x:Key="PanelBackground" Color="#CC1D1D1D" />
-    <SolidColorBrush x:Key="TextPrimary" Color="#F5F5F5" />
-    <SolidColorBrush x:Key="TextSecondary" Color="#B9B9B9" />
+    <SolidColorBrush x:Key="TextPrimary" Color="#F8F8F8" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#D0D0D0" />
     <SolidColorBrush x:Key="Accent" Color="#57C1FF" />
+    <SolidColorBrush x:Key="PrefixConnected" Color="#58D26F" />
+    <SolidColorBrush x:Key="PrefixDisconnected" Color="#9A9A9A" />
     <DropShadowEffect x:Key="BannerShadow" BlurRadius="18" ShadowDepth="4" Opacity="0.35" />
+    <DropShadowEffect x:Key="TextGlow" BlurRadius="6" ShadowDepth="0" Opacity="0.55" Color="#000000" />
   </Application.Resources>
 </Application>

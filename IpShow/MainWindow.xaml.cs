@@ -1,12 +1,14 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
+using System.Windows.Media;
 using Microsoft.Win32;
 
 namespace IpShow;
@@ -17,6 +19,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string PlaceholderLocation = "-";
     private const string StartupRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string StartupValueName = "IpShow";
+    private const string SettingsRegistryKey = @"Software\IpShow";
+    private const string RefreshIntervalValueName = "RefreshIntervalSeconds";
+    private const int DefaultRefreshSeconds = 10;
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromSeconds(6)
@@ -26,11 +31,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private DockMode _dockMode = DockMode.Bottom;
     private string? _previousIp;
     private string? _previousLocation;
+    private bool _isRefreshing;
+    private bool _pendingRefresh;
+    private readonly Brush _prefixConnectedBrush;
+    private readonly Brush _prefixDisconnectedBrush;
 
     private string _currentIpText = PlaceholderIp;
     private string _currentLocationText = PlaceholderLocation;
     private string _previousIpText = PlaceholderIp;
     private string _previousLocationText = PlaceholderLocation;
+    private Brush _currentPrefixBrush = Brushes.Transparent;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -78,10 +88,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    public Brush CurrentPrefixBrush
+    {
+        get => _currentPrefixBrush;
+        private set
+        {
+            if (Equals(_currentPrefixBrush, value)) return;
+            _currentPrefixBrush = value;
+            OnPropertyChanged(nameof(CurrentPrefixBrush));
+        }
+    }
+
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
+        _prefixConnectedBrush = (Brush)Application.Current.FindResource("PrefixConnected");
+        _prefixDisconnectedBrush = (Brush)Application.Current.FindResource("PrefixDisconnected");
+        CurrentPrefixBrush = _prefixDisconnectedBrush;
 
         if (Http.DefaultRequestHeaders.UserAgent.Count == 0)
         {
@@ -90,7 +114,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         _timer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(10)
+            Interval = TimeSpan.FromSeconds(DefaultRefreshSeconds)
         };
         _timer.Tick += async (_, _) => await RefreshAsync();
 
@@ -98,8 +122,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             SetDockMode(_dockMode);
             StartupMenu.IsChecked = IsStartupEnabled();
+            ApplySavedRefreshInterval();
             _timer.Start();
         };
+
+        NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
     }
 
     protected override async void OnContentRendered(EventArgs e)
@@ -108,17 +135,30 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         await RefreshAsync();
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        NetworkChange.NetworkAddressChanged -= NetworkChange_NetworkAddressChanged;
+        base.OnClosed(e);
+    }
+
     private void OnPropertyChanged(string propertyName)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     private async Task RefreshAsync()
     {
+        if (_isRefreshing)
+        {
+            _pendingRefresh = true;
+            return;
+        }
+
+        _isRefreshing = true;
         try
         {
             var data = await FetchIpDataAsync();
             if (data.Ip is { Length: > 0 } ip)
             {
-                var location = BuildLocationText(data.City, data.Region);
+                var location = BuildLocationText(data.CountryCode, data.Region);
                 if (!string.Equals(CurrentIpText, ip, StringComparison.OrdinalIgnoreCase)
                     && CurrentIpText != PlaceholderIp)
                 {
@@ -129,6 +169,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 CurrentIpText = ip;
                 CurrentLocationText = location;
                 UpdatePreviousLine();
+                UpdateConnectionState(true);
             }
             else
             {
@@ -138,6 +179,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         catch
         {
             SetDisconnectedIfEmpty();
+        }
+        finally
+        {
+            _isRefreshing = false;
+        }
+
+        if (_pendingRefresh)
+        {
+            _pendingRefresh = false;
+            await RefreshAsync();
         }
     }
 
@@ -155,51 +206,88 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             return ipWho;
         }
 
+        var ipOnly = await TryFetchIpifyAsync();
+        if (!string.IsNullOrWhiteSpace(ipOnly.Ip))
+        {
+            return ipOnly;
+        }
+
         return IpLookupResult.Empty;
     }
 
     private async Task<IpLookupResult> TryFetchIpInfoAsync()
     {
-        var json = await Http.GetStringAsync("https://ipinfo.io/json");
-        var data = JsonSerializer.Deserialize<IpInfoResponse>(json, new JsonSerializerOptions
+        try
         {
-            PropertyNameCaseInsensitive = true
-        });
+            var json = await Http.GetStringAsync("https://ipinfo.io/json");
+            var data = JsonSerializer.Deserialize<IpInfoResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
 
-        if (data is null || string.IsNullOrWhiteSpace(data.Ip))
+            if (data is null || string.IsNullOrWhiteSpace(data.Ip))
+            {
+                return IpLookupResult.Empty;
+            }
+
+        return new IpLookupResult(data.Ip!, data.CountryCode, data.Region);
+        }
+        catch
         {
             return IpLookupResult.Empty;
         }
-
-        return new IpLookupResult(data.Ip!, data.City, data.Region);
     }
 
     private async Task<IpLookupResult> TryFetchIpWhoAsync()
     {
-        var json = await Http.GetStringAsync("https://ipwho.is/");
-        var data = JsonSerializer.Deserialize<IpWhoResponse>(json, new JsonSerializerOptions
+        try
         {
-            PropertyNameCaseInsensitive = true
-        });
+            var json = await Http.GetStringAsync("https://ipwho.is/");
+            var data = JsonSerializer.Deserialize<IpWhoResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
 
-        if (data is { Success: true } && !string.IsNullOrWhiteSpace(data.Ip))
-        {
-            return new IpLookupResult(data.Ip!, data.City, data.Region);
+            if (data is { Success: true } && !string.IsNullOrWhiteSpace(data.Ip))
+            {
+            return new IpLookupResult(data.Ip!, data.CountryCode, data.Region);
+            }
+
+            return IpLookupResult.Empty;
         }
-
-        return IpLookupResult.Empty;
+        catch
+        {
+            return IpLookupResult.Empty;
+        }
     }
 
-    private string BuildLocationText(string? cityRaw, string? regionRaw)
+    private async Task<IpLookupResult> TryFetchIpifyAsync()
     {
-        var city = NormalizeLocation(cityRaw);
-        if (city != "-")
+        try
         {
-            return city;
-        }
+            var json = await Http.GetStringAsync("https://api.ipify.org?format=json");
+            var data = JsonSerializer.Deserialize<IpifyResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
 
+            if (data is null || string.IsNullOrWhiteSpace(data.Ip))
+            {
+                return IpLookupResult.Empty;
+            }
+
+            return new IpLookupResult(data.Ip!, PlaceholderLocation, PlaceholderLocation);
+        }
+        catch
+        {
+            return IpLookupResult.Empty;
+        }
+    }
+
+    private string BuildLocationText(string? _, string? regionRaw)
+    {
         var region = NormalizeLocation(regionRaw);
-        return region;
+        return region == "-" ? PlaceholderLocation : region;
     }
 
     private static string NormalizeLocation(string? value)
@@ -214,12 +302,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void SetDisconnectedIfEmpty()
     {
-        if (CurrentIpText != PlaceholderIp)
+        if (CurrentIpText == PlaceholderIp)
         {
-            return;
+            CurrentLocationText = PlaceholderLocation;
         }
 
-        CurrentLocationText = PlaceholderLocation;
+        UpdateConnectionState(false);
     }
 
     private void UpdatePreviousLine()
@@ -241,6 +329,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         PreviousIpText = _previousIp;
         PreviousLocationText = _previousLocation;
     }
+
+    private void UpdateConnectionState(bool isConnected)
+    {
+        CurrentPrefixBrush = isConnected ? _prefixConnectedBrush : _prefixDisconnectedBrush;
+    }
+
+    private void NetworkChange_NetworkAddressChanged(object? sender, EventArgs e)
+        => Dispatcher.InvokeAsync(RefreshAsync);
 
     private void AddressLink_Click(object sender, RoutedEventArgs e)
     {
@@ -301,6 +397,21 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void RefreshNowMenu_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
     private void ExitMenu_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void RefreshIntervalMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.Tag is not string secondsRaw)
+        {
+            return;
+        }
+
+        if (!int.TryParse(secondsRaw, out var seconds))
+        {
+            return;
+        }
+
+        SetRefreshInterval(seconds, true);
+    }
 
     private void SetDockMode(DockMode mode)
     {
@@ -387,6 +498,62 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void ApplySavedRefreshInterval()
+    {
+        var seconds = LoadRefreshIntervalSeconds();
+        SetRefreshInterval(seconds, false);
+    }
+
+    private void SetRefreshInterval(int seconds, bool persist)
+    {
+        if (seconds < 5 || seconds > 600)
+        {
+            seconds = DefaultRefreshSeconds;
+        }
+
+        _timer.Interval = TimeSpan.FromSeconds(seconds);
+        UpdateRefreshMenuChecks(seconds);
+
+        if (persist)
+        {
+            SaveRefreshIntervalSeconds(seconds);
+        }
+    }
+
+    private void UpdateRefreshMenuChecks(int seconds)
+    {
+        Refresh5Menu.IsChecked = seconds == 5;
+        Refresh10Menu.IsChecked = seconds == 10;
+        Refresh30Menu.IsChecked = seconds == 30;
+        Refresh60Menu.IsChecked = seconds == 60;
+    }
+
+    private static int LoadRefreshIntervalSeconds()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(SettingsRegistryKey, false);
+            var value = key?.GetValue(RefreshIntervalValueName);
+            return value is int seconds ? seconds : DefaultRefreshSeconds;
+        }
+        catch
+        {
+            return DefaultRefreshSeconds;
+        }
+    }
+
+    private static void SaveRefreshIntervalSeconds(int seconds)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(SettingsRegistryKey);
+            key?.SetValue(RefreshIntervalValueName, seconds, RegistryValueKind.DWord);
+        }
+        catch
+        {
+        }
+    }
+
     private enum DockMode
     {
         Free,
@@ -398,7 +565,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         LockCurrent
     }
 
-    private readonly record struct IpLookupResult(string Ip, string? City, string? Region)
+    private readonly record struct IpLookupResult(string Ip, string? CountryCode, string? Region)
     {
         public static readonly IpLookupResult Empty = new(string.Empty, null, null);
     }
@@ -414,8 +581,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         [JsonPropertyName("region")]
         public string? Region { get; set; }
 
-        [JsonPropertyName("city")]
-        public string? City { get; set; }
+        [JsonPropertyName("country_code")]
+        public string? CountryCode { get; set; }
     }
 
     private sealed class IpInfoResponse
@@ -426,7 +593,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         [JsonPropertyName("region")]
         public string? Region { get; set; }
 
-        [JsonPropertyName("city")]
-        public string? City { get; set; }
+        [JsonPropertyName("country")]
+        public string? CountryCode { get; set; }
+    }
+
+    private sealed class IpifyResponse
+    {
+        [JsonPropertyName("ip")]
+        public string? Ip { get; set; }
     }
 }

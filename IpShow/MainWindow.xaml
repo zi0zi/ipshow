@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="IpShow"
-        Width="156"
+        Width="185"
         MinHeight="42"
         SizeToContent="Height"
         WindowStyle="None"
@@ -25,6 +25,12 @@
       <Separator />
       <MenuItem Header="Start with Windows" IsCheckable="True" Name="StartupMenu" Click="StartupMenu_Click" />
       <Separator />
+      <MenuItem Header="Refresh Interval">
+        <MenuItem Header="5s" IsCheckable="True" Name="Refresh5Menu" Tag="5" Click="RefreshIntervalMenu_Click" />
+        <MenuItem Header="10s" IsCheckable="True" Name="Refresh10Menu" Tag="10" Click="RefreshIntervalMenu_Click" />
+        <MenuItem Header="30s" IsCheckable="True" Name="Refresh30Menu" Tag="30" Click="RefreshIntervalMenu_Click" />
+        <MenuItem Header="60s" IsCheckable="True" Name="Refresh60Menu" Tag="60" Click="RefreshIntervalMenu_Click" />
+      </MenuItem>
       <MenuItem Header="Refresh Now" Click="RefreshNowMenu_Click" />
       <MenuItem Header="Exit" Click="ExitMenu_Click" />
     </ContextMenu>
@@ -32,15 +38,15 @@
 
   <Grid>
     <Border CornerRadius="10"
-            Padding="8"
+            Padding="5"
             BorderThickness="0.6"
             BorderBrush="#66FFFFFF"
             Effect="{StaticResource BannerShadow}">
       <Border.Background>
         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-          <GradientStop Color="#66FFFFFF" Offset="0" />
-          <GradientStop Color="#33FFFFFF" Offset="0.6" />
-          <GradientStop Color="#26BFD8FF" Offset="1" />
+          <GradientStop Color="#8A0E0E0E" Offset="0" />
+          <GradientStop Color="#6A141414" Offset="0.6" />
+          <GradientStop Color="#4A0F1E2A" Offset="1" />
         </LinearGradientBrush>
       </Border.Background>
       <Grid>
@@ -50,9 +56,10 @@
         </Grid.RowDefinitions>
         <TextBlock Foreground="{StaticResource TextPrimary}"
                    FontFamily="Bahnschrift"
-                   FontSize="13"
+                   FontSize="12"
+                   Effect="{StaticResource TextGlow}"
                    TextTrimming="CharacterEllipsis">
-          <Run Text="IP: " />
+          <Run Text="IP: " Foreground="{Binding CurrentPrefixBrush, Mode=OneWay}" />
           <Run Text="{Binding CurrentIpText, Mode=OneWay}" />
           <Run Text=" " />
           <Hyperlink Click="AddressLink_Click"
@@ -66,10 +73,11 @@
         <TextBlock Grid.Row="1"
                    Foreground="{StaticResource TextSecondary}"
                    FontFamily="Bahnschrift"
-                   FontSize="7"
-                   Margin="0,2,0,0"
+                   FontSize="10"
+                   Margin="0,3,0,0"
+                   Effect="{StaticResource TextGlow}"
                    TextTrimming="CharacterEllipsis">
-          <Run Text="IP: " />
+          <Run Text="Last: " />
           <Run Text="{Binding PreviousIpText, Mode=OneWay}" />
           <Run Text=" " />
           <Hyperlink Click="AddressLink_Click"
