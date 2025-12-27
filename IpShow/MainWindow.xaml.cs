@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -37,7 +38,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     };
 
     private readonly DispatcherTimer _timer;
-    private DockMode _dockMode = DockMode.Bottom;
+    private DockMode _dockMode = DockMode.BottomSafe;
     private string? _previousIp;
     private string? _previousLocation;
     private bool _isRefreshing;
@@ -141,6 +142,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             SetDockMode(_dockMode);
             StartupMenu.IsChecked = IsStartupEnabled();
             ApplySavedRefreshInterval();
+            HighlightCurrentCalendarItems();
             _timer.Start();
         };
 
@@ -314,6 +316,22 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
         var region = NormalizeLocation(regionRaw);
         return region == "-" ? PlaceholderLocation : region;
+    }
+
+    private static async Task<long> MeasureSpeedAsync(string url)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            sw.Stop();
+            return response.IsSuccessStatusCode ? sw.ElapsedMilliseconds : -1;
+        }
+        catch
+        {
+            return -1;
+        }
     }
 
     private static string BuildNoCacheUrl(string url)
@@ -547,6 +565,47 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void ExitMenu_Click(object sender, RoutedEventArgs e) => Close();
 
+    private async void ContextMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        // Show loading state
+        PingGoogleMenu.Header = "Google: ...";
+        PingBaiduMenu.Header = "Baidu: ...";
+        PingGitHubMenu.Header = "GitHub: ...";
+        PingYouTubeMenu.Header = "YouTube: ...";
+        PingTelegramMenu.Header = "Telegram: ...";
+
+        // Test speed to all targets in parallel using HTTP
+        var googleTask = MeasureSpeedAsync("https://www.google.com");
+        var baiduTask = MeasureSpeedAsync("https://www.baidu.com");
+        var githubTask = MeasureSpeedAsync("https://github.com");
+        var youtubeTask = MeasureSpeedAsync("https://www.youtube.com");
+        var telegramTask = MeasureSpeedAsync("https://api.telegram.org");
+
+        var results = await Task.WhenAll(googleTask, baiduTask, githubTask, youtubeTask, telegramTask);
+
+        // Update menu items with results (name in default color, speed in color)
+        UpdateSpeedMenuItem(PingGoogleMenu, "Google", results[0]);
+        UpdateSpeedMenuItem(PingBaiduMenu, "Baidu", results[1]);
+        UpdateSpeedMenuItem(PingGitHubMenu, "GitHub", results[2]);
+        UpdateSpeedMenuItem(PingYouTubeMenu, "YouTube", results[3]);
+        UpdateSpeedMenuItem(PingTelegramMenu, "Telegram", results[4]);
+    }
+
+    private static string FormatSpeed(long ms) => ms >= 0 ? $"{ms}ms" : "timeout";
+
+    private void UpdateSpeedMenuItem(MenuItem item, string name, long ms)
+    {
+        var textBlock = new TextBlock();
+        textBlock.Inlines.Add(new Run($"{name}: "));
+        textBlock.Inlines.Add(new Run(FormatSpeed(ms))
+        {
+            Foreground = ms >= 0
+                ? new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50))  // Green
+                : new SolidColorBrush(Color.FromRgb(0xF4, 0x43, 0x36))  // Red
+        });
+        item.Header = textBlock;
+    }
+
     private async void CurrentIpText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         => await RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1));
 
@@ -703,6 +762,37 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch
         {
+        }
+    }
+
+    private void HighlightCurrentCalendarItems()
+    {
+        var now = DateTime.Now;
+        var currentMonth = now.Month;
+        var currentDayOfWeek = (int)now.DayOfWeek;
+
+        // Highlight current month
+        var monthMenuItems = new[] { Month1Menu, Month2Menu, Month3Menu, Month4Menu, Month5Menu, Month6Menu,
+                                      Month7Menu, Month8Menu, Month9Menu, Month10Menu, Month11Menu, Month12Menu };
+        for (int i = 0; i < monthMenuItems.Length; i++)
+        {
+            if (i + 1 == currentMonth)
+            {
+                monthMenuItems[i].FontWeight = FontWeights.Bold;
+                monthMenuItems[i].Foreground = new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50)); // Green
+            }
+        }
+
+        // Highlight current day of week
+        var weekdayMenuItems = new[] { Weekday0Menu, Weekday1Menu, Weekday2Menu, Weekday3Menu,
+                                        Weekday4Menu, Weekday5Menu, Weekday6Menu };
+        for (int i = 0; i < weekdayMenuItems.Length; i++)
+        {
+            if (i == currentDayOfWeek)
+            {
+                weekdayMenuItems[i].FontWeight = FontWeights.Bold;
+                weekdayMenuItems[i].Foreground = new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50)); // Green
+            }
         }
     }
 
