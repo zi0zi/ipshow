@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -22,16 +23,16 @@ namespace IpShow;
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private const string PlaceholderIp = "--";
-    private const string PlaceholderLocation = "-";
+    private const string PlaceholderLocation = "—";
+    private const string PlaceholderDns = "DNS —";
+    private const string ChinaCountryCode = "CN";
     private const string StartupRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string StartupValueName = "IpShow";
     private const string SettingsRegistryKey = @"Software\IpShow";
     private const string RefreshIntervalValueName = "RefreshIntervalSeconds";
     private const int DefaultRefreshSeconds = 10;
     private static readonly string GeoCityDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
-    private static readonly string GeoCountryDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-Country.mmdb");
     private static readonly Lazy<DatabaseReader?> GeoCityReader = new(() => CreateGeoReader(GeoCityDbPath));
-    private static readonly Lazy<DatabaseReader?> GeoCountryReader = new(() => CreateGeoReader(GeoCountryDbPath));
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromSeconds(6)
@@ -39,31 +40,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly DispatcherTimer _timer;
     private DockMode _dockMode = DockMode.BottomSafe;
-    private string? _previousIp;
-    private string? _previousLocation;
     private bool _isRefreshing;
     private bool _pendingRefresh;
-    private readonly Brush _prefixConnectedBrush;
-    private readonly Brush _prefixDisconnectedBrush;
-
-    private string _currentIpText = PlaceholderIp;
+    private readonly Brush _locationChinaBrush;
+    private readonly Brush _locationOtherBrush;
+    private readonly Brush _locationUnknownBrush;
     private string _currentLocationText = PlaceholderLocation;
-    private string _previousIpText = PlaceholderIp;
-    private string _previousLocationText = PlaceholderLocation;
-    private Brush _currentPrefixBrush = Brushes.Transparent;
+    private Brush _currentLocationBrush = Brushes.Transparent;
+    private string _currentDnsText = PlaceholderDns;
 
     public event PropertyChangedEventHandler? PropertyChanged;
-
-    public string CurrentIpText
-    {
-        get => _currentIpText;
-        private set
-        {
-            if (_currentIpText == value) return;
-            _currentIpText = value;
-            OnPropertyChanged(nameof(CurrentIpText));
-        }
-    }
 
     public string CurrentLocationText
     {
@@ -76,36 +62,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    public string PreviousIpText
+    public Brush CurrentLocationBrush
     {
-        get => _previousIpText;
+        get => _currentLocationBrush;
         private set
         {
-            if (_previousIpText == value) return;
-            _previousIpText = value;
-            OnPropertyChanged(nameof(PreviousIpText));
+            if (Equals(_currentLocationBrush, value)) return;
+            _currentLocationBrush = value;
+            OnPropertyChanged(nameof(CurrentLocationBrush));
         }
     }
 
-    public string PreviousLocationText
+    public string CurrentDnsText
     {
-        get => _previousLocationText;
+        get => _currentDnsText;
         private set
         {
-            if (_previousLocationText == value) return;
-            _previousLocationText = value;
-            OnPropertyChanged(nameof(PreviousLocationText));
-        }
-    }
-
-    public Brush CurrentPrefixBrush
-    {
-        get => _currentPrefixBrush;
-        private set
-        {
-            if (Equals(_currentPrefixBrush, value)) return;
-            _currentPrefixBrush = value;
-            OnPropertyChanged(nameof(CurrentPrefixBrush));
+            if (_currentDnsText == value) return;
+            _currentDnsText = value;
+            OnPropertyChanged(nameof(CurrentDnsText));
         }
     }
 
@@ -113,9 +88,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         InitializeComponent();
         DataContext = this;
-        _prefixConnectedBrush = (Brush)Application.Current.FindResource("PrefixConnected");
-        _prefixDisconnectedBrush = (Brush)Application.Current.FindResource("PrefixDisconnected");
-        CurrentPrefixBrush = _prefixDisconnectedBrush;
+        _locationChinaBrush = (Brush)Application.Current.FindResource("LocationChina");
+        _locationOtherBrush = (Brush)Application.Current.FindResource("LocationOther");
+        _locationUnknownBrush = (Brush)Application.Current.FindResource("LocationUnknown");
+        CurrentLocationBrush = _locationUnknownBrush;
+
+        SourceInitialized += (_, _) => GlassHelper.Apply(this);
 
         if (Http.DefaultRequestHeaders.UserAgent.Count == 0)
         {
@@ -177,21 +155,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _isRefreshing = true;
         try
         {
+            // Auxiliary probe isolated so its failure can't block the IP / geo fetch.
+            try { UpdateDns(); } catch { }
+
             var data = await FetchIpDataAsync();
             if (data.Ip is { Length: > 0 } ip)
             {
-                var location = ResolveLocationText(ip, data.Region);
-                if (!string.Equals(CurrentIpText, ip, StringComparison.OrdinalIgnoreCase)
-                    && CurrentIpText != PlaceholderIp)
-                {
-                    _previousIp = CurrentIpText;
-                    _previousLocation = CurrentLocationText;
-                }
-
-                CurrentIpText = ip;
+                var (location, countryCode) = ResolveLocation(ip, data.Region, data.CountryCode);
                 CurrentLocationText = location;
-                UpdatePreviousLine();
-                UpdateConnectionState(true);
+                ApplyLocationBrush(countryCode, isConnected: true);
             }
             else
             {
@@ -216,12 +188,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private async Task<IpLookupResult> FetchIpDataAsync()
     {
+        // ipify first: fastest, IPv4-stable, and the GeoLite2 mmdb can reliably name
+        // the resulting address (this matches the behavior that worked originally).
         var ipOnly = await TryFetchIpifyAsync();
         if (!string.IsNullOrWhiteSpace(ipOnly.Ip))
         {
             return ipOnly;
         }
 
+        // Enriched fallbacks used only when ipify itself fails — they also carry region
+        // and country_code, which ResolveLocation will use if the local mmdb has nothing.
         var ipWho = await TryFetchIpWhoAsync();
         if (!string.IsNullOrWhiteSpace(ipWho.Ip))
         {
@@ -298,7 +274,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 return IpLookupResult.Empty;
             }
 
-            return new IpLookupResult(data.Ip!, PlaceholderLocation, PlaceholderLocation);
+            return new IpLookupResult(data.Ip!, null, null);
         }
         catch
         {
@@ -306,16 +282,51 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private string ResolveLocationText(string ip, string? regionRaw)
+    private (string Location, string? CountryCode) ResolveLocation(string ip, string? regionRaw, string? countryCodeRaw)
     {
-        var localRegion = TryResolveRegionFromLocalDb(ip);
-        if (!string.IsNullOrWhiteSpace(localRegion))
+        var local = TryResolveLocationFromLocalDb(ip);
+        var remoteRegion = NormalizeLocation(regionRaw);
+        var remoteCountry = string.IsNullOrWhiteSpace(countryCodeRaw) ? null : countryCodeRaw!.Trim();
+
+        // Prefer local mmdb name when available (consistent English / pinyin spelling).
+        if (local.Location is { Length: > 0 } loc)
         {
-            return localRegion;
+            return (loc, local.CountryCode ?? remoteCountry);
         }
 
-        var region = NormalizeLocation(regionRaw);
-        return region == "-" ? PlaceholderLocation : region;
+        // Local mmdb had nothing — fall back to the remote service's region string
+        // so Chinese IPs (often missing from GeoLite2 subdivision data) still show.
+        if (remoteRegion != "-")
+        {
+            return (remoteRegion, local.CountryCode ?? remoteCountry);
+        }
+
+        // Last resort: show the country code itself (e.g. "CN") so the line is never blank when online.
+        if (!string.IsNullOrWhiteSpace(remoteCountry))
+        {
+            return (remoteCountry!, remoteCountry);
+        }
+
+        return (PlaceholderLocation, null);
+    }
+
+    private void ApplyLocationBrush(string? countryCode, bool isConnected)
+    {
+        if (!isConnected)
+        {
+            CurrentLocationBrush = _locationUnknownBrush;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(countryCode)
+            && countryCode!.Trim().Equals(ChinaCountryCode, StringComparison.OrdinalIgnoreCase))
+        {
+            CurrentLocationBrush = _locationChinaBrush;
+        }
+        else
+        {
+            CurrentLocationBrush = _locationOtherBrush;
+        }
     }
 
     private static async Task<long> MeasureSpeedAsync(string url)
@@ -344,7 +355,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try
         {
-            return File.Exists(path) ? new DatabaseReader(path) : null;
+            // Force English so regions come back as e.g. "Guangdong" rather than localized Chinese.
+            return File.Exists(path) ? new DatabaseReader(path, new[] { "en" }) : null;
         }
         catch
         {
@@ -352,72 +364,77 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private static string? TryResolveRegionFromLocalDb(string ip)
+    private static (string? Location, string? CountryCode) TryResolveLocationFromLocalDb(string ip)
     {
         if (!IPAddress.TryParse(ip, out var address))
         {
-            return null;
+            return (null, null);
         }
 
-        var city = TryResolveRegionFromCityDb(address);
-        if (!string.IsNullOrWhiteSpace(city))
-        {
-            return city;
-        }
-
-        var country = TryResolveCountryFromDb(address);
-        return string.IsNullOrWhiteSpace(country) ? null : country;
+        // City DB is a superset of Country DB, and TryResolveFromCityDb already falls
+        // back to the country name as its last-resort return, so a separate Country DB
+        // lookup is no longer needed.
+        return TryResolveFromCityDb(address);
     }
 
-    private static string? TryResolveRegionFromCityDb(IPAddress address)
+    private static (string? Location, string? CountryCode) TryResolveFromCityDb(IPAddress address)
     {
         if (GeoCityReader.Value is null)
         {
-            return null;
+            return (null, null);
         }
 
         try
         {
             var response = GeoCityReader.Value.City(address);
+            var iso = response?.Country?.IsoCode;
             var region = NormalizeLocation(response?.MostSpecificSubdivision?.Name);
             if (region != "-")
             {
-                return region;
+                return (region, iso);
             }
 
             var city = NormalizeLocation(response?.City?.Name);
-            return city != "-" ? city : null;
+            if (city != "-")
+            {
+                return (city, iso);
+            }
+
+            var country = NormalizeLocation(response?.Country?.Name);
+            return country == "-" ? (null, iso) : (country, iso);
         }
         catch (AddressNotFoundException)
         {
-            return null;
+            return (null, null);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 
-    private static string? TryResolveCountryFromDb(IPAddress address)
+    private void UpdateDns()
     {
-        if (GeoCountryReader.Value is null)
-        {
-            return null;
-        }
-
         try
         {
-            var response = GeoCountryReader.Value.Country(address);
-            var country = NormalizeLocation(response?.Country?.Name);
-            return country == "-" ? null : country;
-        }
-        catch (AddressNotFoundException)
-        {
-            return null;
+            var dns = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up
+                              && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .Select(nic => nic.GetIPProperties().DnsAddresses)
+                .Where(list => list is { Count: > 0 })
+                .SelectMany(list => list)
+                .FirstOrDefault(addr => addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                ?? NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(nic => nic.OperationalStatus == OperationalStatus.Up
+                                  && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                    .SelectMany(nic => nic.GetIPProperties().DnsAddresses)
+                    .FirstOrDefault();
+
+            CurrentDnsText = dns is null ? PlaceholderDns : $"DNS {dns}";
         }
         catch
         {
-            return null;
+            CurrentDnsText = PlaceholderDns;
         }
     }
 
@@ -433,45 +450,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private void HandleDisconnected()
     {
-        if (CurrentIpText != PlaceholderIp)
-        {
-            _previousIp = CurrentIpText;
-            _previousLocation = CurrentLocationText;
-            CurrentIpText = PlaceholderIp;
-            CurrentLocationText = PlaceholderLocation;
-            UpdatePreviousLine();
-        }
-        else
-        {
-            CurrentLocationText = PlaceholderLocation;
-        }
-
-        UpdateConnectionState(false);
-    }
-
-    private void UpdatePreviousLine()
-    {
-        if (string.IsNullOrWhiteSpace(_previousIp))
-        {
-            PreviousIpText = "--";
-            PreviousLocationText = PlaceholderLocation;
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_previousLocation))
-        {
-            PreviousIpText = _previousIp;
-            PreviousLocationText = PlaceholderLocation;
-            return;
-        }
-
-        PreviousIpText = _previousIp;
-        PreviousLocationText = _previousLocation;
-    }
-
-    private void UpdateConnectionState(bool isConnected)
-    {
-        CurrentPrefixBrush = isConnected ? _prefixConnectedBrush : _prefixDisconnectedBrush;
+        CurrentLocationText = PlaceholderLocation;
+        ApplyLocationBrush(null, isConnected: false);
     }
 
     private void NetworkChange_NetworkAddressChanged(object? sender, EventArgs e)
@@ -493,7 +473,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         for (var i = 0; i < attempts; i++)
         {
             await RefreshAsync();
-            if (CurrentIpText != PlaceholderIp)
+            if (CurrentLocationText != PlaceholderLocation)
             {
                 return;
             }

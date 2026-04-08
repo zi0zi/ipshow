@@ -14,8 +14,5 @@
     <None Include="GeoIP\GeoLite2-City.mmdb">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="GeoIP\GeoLite2-Country.mmdb">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
 </Project>

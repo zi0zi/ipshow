@@ -9,7 +9,10 @@
     <SolidColorBrush x:Key="Accent" Color="#57C1FF" />
     <SolidColorBrush x:Key="PrefixConnected" Color="#58D26F" />
     <SolidColorBrush x:Key="PrefixDisconnected" Color="#9A9A9A" />
-    <DropShadowEffect x:Key="BannerShadow" BlurRadius="18" ShadowDepth="4" Opacity="0.35" />
-    <DropShadowEffect x:Key="TextGlow" BlurRadius="6" ShadowDepth="0" Opacity="0.55" Color="#000000" />
+    <SolidColorBrush x:Key="LocationChina" Color="#FF5252" />
+    <SolidColorBrush x:Key="LocationOther" Color="#58D26F" />
+    <SolidColorBrush x:Key="LocationUnknown" Color="#9A9A9A" />
+<DropShadowEffect x:Key="BannerShadow" BlurRadius="18" ShadowDepth="4" Opacity="0.35" />
+    <DropShadowEffect x:Key="TextGlow" BlurRadius="6" ShadowDepth="0" Opacity="0.7" Color="#000000" />
   </Application.Resources>
 </Application>
