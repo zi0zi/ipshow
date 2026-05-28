@@ -104,7 +104,7 @@
             BorderThickness="0"
             BorderBrush="Transparent"
             Padding="7,2">
-      <Grid>
+      <Grid VerticalAlignment="Center">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -134,17 +134,17 @@
                      Text="{Binding CpuUsageText, Mode=OneWay}" />
         </StackPanel>
         <Grid Grid.Row="1"
-              Width="158"
+              Width="136"
               HorizontalAlignment="Center"
               Margin="0,0,0,0">
           <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="10" />
-            <ColumnDefinition Width="38" />
-            <ColumnDefinition Width="25" />
-            <ColumnDefinition Width="10" />
-            <ColumnDefinition Width="10" />
-            <ColumnDefinition Width="38" />
-            <ColumnDefinition Width="25" />
+            <ColumnDefinition Width="8" />
+            <ColumnDefinition Width="34" />
+            <ColumnDefinition Width="22" />
+            <ColumnDefinition Width="8" />
+            <ColumnDefinition Width="8" />
+            <ColumnDefinition Width="34" />
+            <ColumnDefinition Width="22" />
           </Grid.ColumnDefinitions>
           <TextBlock Grid.Column="0"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
