@@ -3,15 +3,22 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="IpShow"
-        MinWidth="110"
-        MaxWidth="220"
-        SizeToContent="WidthAndHeight"
+        Icon="Assets/IpShow.ico"
+        Width="176"
+        Height="38"
+        MinWidth="176"
+        MaxWidth="176"
+        MinHeight="38"
+        MaxHeight="38"
+        SizeToContent="Manual"
         WindowStyle="None"
         AllowsTransparency="False"
-        Background="Transparent"
+        Background="#01000000"
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="0"
@@ -22,6 +29,8 @@
   </shell:WindowChrome.WindowChrome>
   <Window.ContextMenu>
     <ContextMenu Opened="ContextMenu_Opened">
+      <MenuItem Header="DNS —" Name="DnsMenu" />
+      <Separator />
       <MenuItem Header="Google: -" Name="PingGoogleMenu" />
       <MenuItem Header="Baidu: -" Name="PingBaiduMenu" />
       <MenuItem Header="GitHub: -" Name="PingGitHubMenu" />
@@ -36,6 +45,15 @@
       <Separator />
       <MenuItem Header="Free Move" IsCheckable="True" Name="DockFreeMenu" Click="DockFreeMenu_Click" />
       <MenuItem Header="Lock Current Position" IsCheckable="True" Name="DockCurrentMenu" Click="DockCurrentMenu_Click" />
+      <Separator />
+      <MenuItem Header="Layer">
+        <MenuItem Header="Top Layer" IsCheckable="True" Name="LayerTopMenu" Click="LayerMenu_Click" />
+        <MenuItem Header="Normal Layer" IsCheckable="True" Name="LayerNormalMenu" Click="LayerMenu_Click" />
+        <MenuItem Header="Bottom Layer" IsCheckable="True" Name="LayerBottomMenu" Click="LayerMenu_Click" />
+      </MenuItem>
+      <MenuItem Header="Balanced Text" IsCheckable="True" Name="BalancedTextMenu" Click="TextThemeMenu_Click" />
+      <MenuItem Header="Light Text" IsCheckable="True" Name="LightTextMenu" Click="TextThemeMenu_Click" />
+      <MenuItem Header="Dark Text" IsCheckable="True" Name="DarkTextMenu" Click="TextThemeMenu_Click" />
       <Separator />
       <MenuItem Header="Start with Windows" IsCheckable="True" Name="StartupMenu" Click="StartupMenu_Click" />
       <Separator />
@@ -76,39 +94,91 @@
   <Grid>
     <!-- Single glass frame over the system acrylic backdrop -->
     <Border CornerRadius="10"
-            Background="Transparent"
+            Background="#06000000"
             BorderThickness="0.8"
-            BorderBrush="#33FFFFFF"
-            Padding="10,3">
+            BorderBrush="#22FFFFFF"
+            Padding="7,2">
       <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <TextBlock FontFamily="Bahnschrift"
-                   FontSize="14"
-                   HorizontalAlignment="Center"
-                   Effect="{StaticResource TextGlow}"
-                   TextTrimming="CharacterEllipsis"
-                   Cursor="Hand"
-                   MouseLeftButtonDown="CurrentIpText_MouseLeftButtonDown">
-          <Hyperlink Click="AddressLink_Click"
-                     Tag="{Binding CurrentLocationText, Mode=OneWay}"
-                     Foreground="{Binding CurrentLocationBrush, Mode=OneWay}"
-                     TextDecorations="{x:Null}">
-            <Run Text="{Binding CurrentLocationText, Mode=OneWay}" />
-          </Hyperlink>
-        </TextBlock>
-        <TextBlock Grid.Row="1"
-                   Foreground="{StaticResource TextSecondary}"
-                   FontFamily="Bahnschrift"
-                   FontSize="11"
-                   HorizontalAlignment="Center"
-                   Margin="0,1,0,0"
-                   Effect="{StaticResource TextGlow}"
-                   TextTrimming="CharacterEllipsis">
-          <Run Text="{Binding CurrentDnsText, Mode=OneWay}" />
-        </TextBlock>
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Center">
+          <TextBlock FontFamily="Bahnschrift"
+                     FontSize="12.5"
+                     MaxWidth="92"
+                     Effect="{StaticResource TextGlow}"
+                     TextTrimming="CharacterEllipsis"
+                     Cursor="Hand"
+                     MouseLeftButtonDown="CurrentIpText_MouseLeftButtonDown">
+            <Hyperlink Click="AddressLink_Click"
+                       Tag="{Binding CurrentLocationText, Mode=OneWay}"
+                       Foreground="{Binding CurrentLocationBrush, Mode=OneWay}"
+                       TextDecorations="{x:Null}">
+              <Run Text="{Binding CurrentLocationText, Mode=OneWay}" />
+            </Hyperlink>
+          </TextBlock>
+          <TextBlock Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     Margin="12,1,0,0"
+                     Effect="{StaticResource TextGlow}"
+                     TextTrimming="CharacterEllipsis"
+                     Text="{Binding CpuUsageText, Mode=OneWay}" />
+        </StackPanel>
+        <Grid Grid.Row="1"
+              Width="158"
+              HorizontalAlignment="Center"
+              Margin="0,0,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="10" />
+            <ColumnDefinition Width="36" />
+            <ColumnDefinition Width="24" />
+            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="10" />
+            <ColumnDefinition Width="36" />
+            <ColumnDefinition Width="24" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     Effect="{StaticResource TextGlow}"
+                     Text="↓" />
+          <TextBlock Grid.Column="1"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     TextAlignment="Right"
+                     Effect="{StaticResource TextGlow}"
+                     Text="{Binding DownloadSpeedValueText, Mode=OneWay}" />
+          <TextBlock Grid.Column="2"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     Effect="{StaticResource TextGlow}"
+                     Text="{Binding DownloadSpeedUnitText, Mode=OneWay}" />
+          <TextBlock Grid.Column="4"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     Effect="{StaticResource TextGlow}"
+                     Text="↑" />
+          <TextBlock Grid.Column="5"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     TextAlignment="Right"
+                     Effect="{StaticResource TextGlow}"
+                     Text="{Binding UploadSpeedValueText, Mode=OneWay}" />
+          <TextBlock Grid.Column="6"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="10"
+                     Effect="{StaticResource TextGlow}"
+                     Text="{Binding UploadSpeedUnitText, Mode=OneWay}" />
+        </Grid>
       </Grid>
     </Border>
   </Grid>

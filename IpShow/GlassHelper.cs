@@ -5,8 +5,8 @@ using System.Windows.Interop;
 namespace IpShow;
 
 /// <summary>
-/// Applies Windows 11 acrylic system backdrop (DWMSBT_TRANSIENTWINDOW) when available,
-/// falling back to the legacy SetWindowCompositionAttribute acrylic blur on Windows 10.
+/// Keeps the overlay visually light on Windows 11, falling back to a very subtle
+/// legacy acrylic tint on Windows 10.
 /// </summary>
 internal static class GlassHelper
 {
@@ -60,7 +60,7 @@ internal static class GlassHelper
         int dark = 1;
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
 
-        if (TryApplyWin11Acrylic(hwnd))
+        if (TryApplyWin11TransparentBackdrop(hwnd))
         {
             return;
         }
@@ -68,7 +68,7 @@ internal static class GlassHelper
         TryApplyLegacyAcrylic(hwnd);
     }
 
-    private static bool TryApplyWin11Acrylic(IntPtr hwnd)
+    private static bool TryApplyWin11TransparentBackdrop(IntPtr hwnd)
     {
         // DWMWA_SYSTEMBACKDROP_TYPE requires Windows 11 22H2 (build 22621) or newer.
         if (!OperatingSystem.IsWindows() || Environment.OSVersion.Version.Build < 22621)
@@ -76,7 +76,7 @@ internal static class GlassHelper
             return false;
         }
 
-        int backdrop = DWMSBT_TRANSIENTWINDOW;
+        int backdrop = 0;
         if (DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int)) != 0)
         {
             return false;
@@ -98,7 +98,7 @@ internal static class GlassHelper
                     ? ACCENT_ENABLE_ACRYLICBLURBEHIND
                     : ACCENT_ENABLE_BLURBEHIND,
                 // ABGR: low alpha dark tint so the blurred desktop shows through
-                GradientColor = unchecked((int)0x401D1D1D)
+                GradientColor = unchecked((int)0x141D1D1D)
             };
 
             var size = Marshal.SizeOf(accent);

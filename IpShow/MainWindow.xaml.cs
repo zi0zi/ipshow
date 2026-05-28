@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
@@ -14,6 +15,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
 using System.Windows.Media;
+using System.Windows.Interop;
 using MaxMind.GeoIP2;
 using MaxMind.GeoIP2.Exceptions;
 using Microsoft.Win32;
@@ -30,6 +32,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string StartupValueName = "IpShow";
     private const string SettingsRegistryKey = @"Software\IpShow";
     private const string RefreshIntervalValueName = "RefreshIntervalSeconds";
+    private const string AlwaysOnTopValueName = "AlwaysOnTop";
+    private const string WindowLayerValueName = "WindowLayer";
+    private const string TextThemeValueName = "TextTheme";
     private const int DefaultRefreshSeconds = 10;
     private static readonly string GeoCityDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
     private static readonly Lazy<DatabaseReader?> GeoCityReader = new(() => CreateGeoReader(GeoCityDbPath));
@@ -39,15 +44,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     };
 
     private readonly DispatcherTimer _timer;
-    private DockMode _dockMode = DockMode.BottomSafe;
+    private readonly DispatcherTimer _systemStatsTimer;
+    private DockMode _dockMode = DockMode.Free;
+    private WindowLayer _windowLayer = WindowLayer.Top;
     private bool _isRefreshing;
     private bool _pendingRefresh;
+    private NetworkTotals? _lastNetworkTotals;
+    private CpuTimes? _lastCpuTimes;
     private readonly Brush _locationChinaBrush;
     private readonly Brush _locationOtherBrush;
     private readonly Brush _locationUnknownBrush;
+    private readonly Brush _balancedStatusTextBrush = new SolidColorBrush(Color.FromRgb(0xF1, 0xF3, 0xF6));
+    private readonly Brush _lightStatusTextBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF));
+    private readonly Brush _darkStatusTextBrush = new SolidColorBrush(Color.FromRgb(0x20, 0x24, 0x2A));
     private string _currentLocationText = PlaceholderLocation;
     private Brush _currentLocationBrush = Brushes.Transparent;
     private string _currentDnsText = PlaceholderDns;
+    private Brush _statusTextBrush = Brushes.Transparent;
+    private string _downloadSpeedValueText = "0";
+    private string _downloadSpeedUnitText = "B/s";
+    private string _uploadSpeedValueText = "0";
+    private string _uploadSpeedUnitText = "B/s";
+    private string _cpuUsageText = "CPU --";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -80,7 +98,74 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (_currentDnsText == value) return;
             _currentDnsText = value;
+            DnsMenu.Header = value;
             OnPropertyChanged(nameof(CurrentDnsText));
+        }
+    }
+
+    public Brush StatusTextBrush
+    {
+        get => _statusTextBrush;
+        private set
+        {
+            if (Equals(_statusTextBrush, value)) return;
+            _statusTextBrush = value;
+            OnPropertyChanged(nameof(StatusTextBrush));
+        }
+    }
+
+    public string DownloadSpeedValueText
+    {
+        get => _downloadSpeedValueText;
+        private set
+        {
+            if (_downloadSpeedValueText == value) return;
+            _downloadSpeedValueText = value;
+            OnPropertyChanged(nameof(DownloadSpeedValueText));
+        }
+    }
+
+    public string DownloadSpeedUnitText
+    {
+        get => _downloadSpeedUnitText;
+        private set
+        {
+            if (_downloadSpeedUnitText == value) return;
+            _downloadSpeedUnitText = value;
+            OnPropertyChanged(nameof(DownloadSpeedUnitText));
+        }
+    }
+
+    public string UploadSpeedValueText
+    {
+        get => _uploadSpeedValueText;
+        private set
+        {
+            if (_uploadSpeedValueText == value) return;
+            _uploadSpeedValueText = value;
+            OnPropertyChanged(nameof(UploadSpeedValueText));
+        }
+    }
+
+    public string UploadSpeedUnitText
+    {
+        get => _uploadSpeedUnitText;
+        private set
+        {
+            if (_uploadSpeedUnitText == value) return;
+            _uploadSpeedUnitText = value;
+            OnPropertyChanged(nameof(UploadSpeedUnitText));
+        }
+    }
+
+    public string CpuUsageText
+    {
+        get => _cpuUsageText;
+        private set
+        {
+            if (_cpuUsageText == value) return;
+            _cpuUsageText = value;
+            OnPropertyChanged(nameof(CpuUsageText));
         }
     }
 
@@ -92,8 +177,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _locationOtherBrush = (Brush)Application.Current.FindResource("LocationOther");
         _locationUnknownBrush = (Brush)Application.Current.FindResource("LocationUnknown");
         CurrentLocationBrush = _locationUnknownBrush;
+        StatusTextBrush = _balancedStatusTextBrush;
 
-        SourceInitialized += (_, _) => GlassHelper.Apply(this);
+        SourceInitialized += (_, _) =>
+        {
+            GlassHelper.Apply(this);
+            ApplyWindowLayer();
+        };
 
         if (Http.DefaultRequestHeaders.UserAgent.Count == 0)
         {
@@ -115,13 +205,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         };
         _timer.Tick += async (_, _) => await RefreshAsync();
 
+        _systemStatsTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _systemStatsTimer.Tick += (_, _) => UpdateSystemStats();
+
         Loaded += (_, _) =>
         {
-            SetDockMode(_dockMode);
+            SetDockMode(_dockMode, placeDefaultFreePosition: true);
+            ApplySavedWindowLayer();
+            ApplySavedTextTheme();
             StartupMenu.IsChecked = IsStartupEnabled();
             ApplySavedRefreshInterval();
             HighlightCurrentCalendarItems();
+            UpdateSystemStats();
             _timer.Start();
+            _systemStatsTimer.Start();
+        };
+
+        Activated += (_, _) =>
+        {
+            if (_windowLayer == WindowLayer.Bottom)
+            {
+                Dispatcher.BeginInvoke(ApplyWindowLayer, DispatcherPriority.Background);
+            }
         };
 
         NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
@@ -138,6 +246,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         NetworkChange.NetworkAddressChanged -= NetworkChange_NetworkAddressChanged;
         NetworkChange.NetworkAvailabilityChanged -= NetworkChange_NetworkAvailabilityChanged;
+        _timer.Stop();
+        _systemStatsTimer.Stop();
         base.OnClosed(e);
     }
 
@@ -351,6 +461,132 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return $"{url}{separator}t={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
     }
 
+    private void UpdateSystemStats()
+    {
+        UpdateNetworkSpeed();
+        UpdateCpuUsage();
+    }
+
+    private void UpdateNetworkSpeed()
+    {
+        try
+        {
+            var current = ReadNetworkTotals();
+            if (_lastNetworkTotals is null)
+            {
+                _lastNetworkTotals = current;
+                SetSpeedTexts(0, 0);
+                return;
+            }
+
+            var elapsed = Math.Max(0.001, (current.SampledAt - _lastNetworkTotals.Value.SampledAt).TotalSeconds);
+            var received = Math.Max(0, current.BytesReceived - _lastNetworkTotals.Value.BytesReceived);
+            var sent = Math.Max(0, current.BytesSent - _lastNetworkTotals.Value.BytesSent);
+
+            SetSpeedTexts(received / elapsed, sent / elapsed);
+            _lastNetworkTotals = current;
+        }
+        catch
+        {
+            DownloadSpeedValueText = "--";
+            DownloadSpeedUnitText = string.Empty;
+            UploadSpeedValueText = "--";
+            UploadSpeedUnitText = string.Empty;
+        }
+    }
+
+    private void SetSpeedTexts(double downloadBytesPerSecond, double uploadBytesPerSecond)
+    {
+        var download = FormatBytesPerSecond(downloadBytesPerSecond);
+        var upload = FormatBytesPerSecond(uploadBytesPerSecond);
+        DownloadSpeedValueText = download.Value;
+        DownloadSpeedUnitText = download.Unit;
+        UploadSpeedValueText = upload.Value;
+        UploadSpeedUnitText = upload.Unit;
+    }
+
+    private void UpdateCpuUsage()
+    {
+        try
+        {
+            var current = ReadCpuTimes();
+            if (current is null)
+            {
+                CpuUsageText = "CPU --";
+                return;
+            }
+
+            if (_lastCpuTimes is null)
+            {
+                _lastCpuTimes = current;
+                CpuUsageText = "CPU 0%";
+                return;
+            }
+
+            var previous = _lastCpuTimes.Value;
+            var total = current.Value.Total - previous.Total;
+            var idle = current.Value.Idle - previous.Idle;
+            var usage = total <= 0 ? 0 : (1.0 - idle / (double)total) * 100;
+            usage = Math.Clamp(usage, 0, 100);
+
+            CpuUsageText = $"CPU {usage:0}%";
+            _lastCpuTimes = current;
+        }
+        catch
+        {
+            CpuUsageText = "CPU --";
+        }
+    }
+
+    private static NetworkTotals ReadNetworkTotals()
+    {
+        long bytesReceived = 0;
+        long bytesSent = 0;
+
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.OperationalStatus != OperationalStatus.Up
+                || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback
+                || nic.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+            {
+                continue;
+            }
+
+            var stats = nic.GetIPStatistics();
+            bytesReceived += stats.BytesReceived;
+            bytesSent += stats.BytesSent;
+        }
+
+        return new NetworkTotals(bytesReceived, bytesSent, DateTimeOffset.UtcNow);
+    }
+
+    private static SpeedText FormatBytesPerSecond(double bytesPerSecond)
+    {
+        string[] units = ["B/s", "K/s", "M/s", "G/s"];
+        var value = Math.Max(0, bytesPerSecond);
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        return new SpeedText(unit == 0 ? $"{value:0}" : $"{value:0.#}", units[unit]);
+    }
+
+    private static CpuTimes? ReadCpuTimes()
+    {
+        if (!GetSystemTimes(out var idleTime, out var kernelTime, out var userTime))
+        {
+            return null;
+        }
+
+        var idle = idleTime.ToUInt64();
+        var kernel = kernelTime.ToUInt64();
+        var user = userTime.ToUInt64();
+        return new CpuTimes(idle, kernel + user);
+    }
+
     private static DatabaseReader? CreateGeoReader(string path)
     {
         try
@@ -541,12 +777,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void LayerMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var layer = sender == LayerBottomMenu
+            ? WindowLayer.Bottom
+            : sender == LayerNormalMenu
+                ? WindowLayer.Normal
+                : WindowLayer.Top;
+        ApplyWindowLayer(layer);
+        SaveWindowLayer(layer);
+    }
+
+    private void TextThemeMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var theme = sender == DarkTextMenu
+            ? TextTheme.Dark
+            : sender == LightTextMenu
+                ? TextTheme.Light
+                : TextTheme.Balanced;
+        ApplyTextTheme(theme);
+        SaveTextTheme(theme);
+    }
+
     private async void RefreshNowMenu_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
 
     private void ExitMenu_Click(object sender, RoutedEventArgs e) => Close();
 
     private async void ContextMenu_Opened(object sender, RoutedEventArgs e)
     {
+        try { UpdateDns(); } catch { }
+
         // Show loading state
         PingGoogleMenu.Header = "Google: ...";
         PingBaiduMenu.Header = "Baidu: ...";
@@ -604,7 +864,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SetRefreshInterval(seconds, true);
     }
 
-    private void SetDockMode(DockMode mode)
+    private void SetDockMode(DockMode mode, bool placeDefaultFreePosition = false)
     {
         _dockMode = mode;
 
@@ -616,7 +876,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DockFreeMenu.IsChecked = mode == DockMode.Free;
         DockCurrentMenu.IsChecked = mode == DockMode.LockCurrent;
 
-        if (mode == DockMode.Free || mode == DockMode.LockCurrent)
+        if (mode == DockMode.Free)
+        {
+            if (placeDefaultFreePosition)
+            {
+                PlaceDefaultFreePosition();
+            }
+
+            return;
+        }
+
+        if (mode == DockMode.LockCurrent)
         {
             return;
         }
@@ -652,6 +922,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Left = leftRight;
             Top = workArea.Bottom - Height - edgeMargin;
         }
+    }
+
+    private void PlaceDefaultFreePosition()
+    {
+        var workArea = SystemParameters.WorkArea;
+        const double rightInset = 260;
+        const double topInset = 88;
+        const double minMargin = 24;
+
+        Left = Math.Max(workArea.Left + minMargin, workArea.Right - Width - rightInset);
+        Top = Math.Min(workArea.Bottom - Height - minMargin, workArea.Top + topInset);
     }
 
     private static bool IsStartupEnabled()
@@ -745,6 +1026,126 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void ApplySavedWindowLayer()
+    {
+        ApplyWindowLayer(LoadWindowLayer());
+    }
+
+    private void ApplyWindowLayer(WindowLayer layer)
+    {
+        _windowLayer = layer;
+        Topmost = layer == WindowLayer.Top;
+        UpdateLayerMenuChecks(layer);
+        ApplyWindowLayer();
+    }
+
+    private void ApplyWindowLayer()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var insertAfter = _windowLayer switch
+        {
+            WindowLayer.Top => HwndTopMost,
+            WindowLayer.Bottom => HwndBottom,
+            _ => HwndNoTopMost
+        };
+
+        SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate);
+    }
+
+    private void UpdateLayerMenuChecks(WindowLayer layer)
+    {
+        LayerTopMenu.IsChecked = layer == WindowLayer.Top;
+        LayerNormalMenu.IsChecked = layer == WindowLayer.Normal;
+        LayerBottomMenu.IsChecked = layer == WindowLayer.Bottom;
+    }
+
+    private static WindowLayer LoadWindowLayer()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(SettingsRegistryKey, false);
+            var value = key?.GetValue(WindowLayerValueName) as string;
+            if (Enum.TryParse<WindowLayer>(value, true, out var layer))
+            {
+                return layer;
+            }
+
+            var legacyTopmost = key?.GetValue(AlwaysOnTopValueName);
+            return legacyTopmost is int enabled && enabled == 0 ? WindowLayer.Normal : WindowLayer.Top;
+        }
+        catch
+        {
+            return WindowLayer.Top;
+        }
+    }
+
+    private static void SaveWindowLayer(WindowLayer layer)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(SettingsRegistryKey);
+            key?.SetValue(WindowLayerValueName, layer.ToString(), RegistryValueKind.String);
+            key?.SetValue(AlwaysOnTopValueName, layer == WindowLayer.Top ? 1 : 0, RegistryValueKind.DWord);
+        }
+        catch
+        {
+        }
+    }
+
+    private void ApplySavedTextTheme()
+    {
+        ApplyTextTheme(LoadTextTheme());
+    }
+
+    private void ApplyTextTheme(TextTheme theme)
+    {
+        StatusTextBrush = theme switch
+        {
+            TextTheme.Dark => _darkStatusTextBrush,
+            TextTheme.Light => _lightStatusTextBrush,
+            _ => _balancedStatusTextBrush
+        };
+        BalancedTextMenu.IsChecked = theme == TextTheme.Balanced;
+        LightTextMenu.IsChecked = theme == TextTheme.Light;
+        DarkTextMenu.IsChecked = theme == TextTheme.Dark;
+    }
+
+    private static TextTheme LoadTextTheme()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(SettingsRegistryKey, false);
+            var value = key?.GetValue(TextThemeValueName) as string;
+            if (Enum.TryParse<TextTheme>(value, true, out var theme))
+            {
+                return theme;
+            }
+
+            return TextTheme.Balanced;
+        }
+        catch
+        {
+            return TextTheme.Balanced;
+        }
+    }
+
+    private static void SaveTextTheme(TextTheme theme)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(SettingsRegistryKey);
+            key?.SetValue(TextThemeValueName, theme.ToString(), RegistryValueKind.String);
+        }
+        catch
+        {
+        }
+    }
+
     private void HighlightCurrentCalendarItems()
     {
         var now = DateTime.Now;
@@ -786,6 +1187,55 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         BottomRight,
         LockCurrent
     }
+
+    private enum WindowLayer
+    {
+        Top,
+        Normal,
+        Bottom
+    }
+
+    private enum TextTheme
+    {
+        Balanced,
+        Light,
+        Dark
+    }
+
+    private readonly record struct NetworkTotals(long BytesReceived, long BytesSent, DateTimeOffset SampledAt);
+
+    private readonly record struct CpuTimes(ulong Idle, ulong Total);
+
+    private readonly record struct SpeedText(string Value, string Unit);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct FileTime
+    {
+        private readonly uint _lowDateTime;
+        private readonly uint _highDateTime;
+
+        public ulong ToUInt64() => ((ulong)_highDateTime << 32) | _lowDateTime;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetSystemTimes(out FileTime idleTime, out FileTime kernelTime, out FileTime userTime);
+
+    private static readonly IntPtr HwndTopMost = new(-1);
+    private static readonly IntPtr HwndNoTopMost = new(-2);
+    private static readonly IntPtr HwndBottom = new(1);
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
 
     private readonly record struct IpLookupResult(string Ip, string? CountryCode, string? Region)
     {
