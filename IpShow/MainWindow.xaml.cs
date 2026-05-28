@@ -19,6 +19,8 @@ using System.Windows.Interop;
 using MaxMind.GeoIP2;
 using MaxMind.GeoIP2.Exceptions;
 using Microsoft.Win32;
+using Drawing = System.Drawing;
+using Forms = System.Windows.Forms;
 
 namespace IpShow;
 
@@ -34,6 +36,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string RefreshIntervalValueName = "RefreshIntervalSeconds";
     private const string AlwaysOnTopValueName = "AlwaysOnTop";
     private const string WindowLayerValueName = "WindowLayer";
+    private const string DisplayModeValueName = "DisplayMode";
+    private const string ShowTrayIconValueName = "ShowTrayIcon";
     private const string TextThemeValueName = "TextTheme";
     private const int DefaultRefreshSeconds = 10;
     private static readonly string GeoCityDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
@@ -45,22 +49,29 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _systemStatsTimer;
+    private readonly Forms.NotifyIcon _trayIcon;
+    private readonly Forms.ToolStripMenuItem _trayShowWindowMenu;
+    private readonly Forms.ToolStripMenuItem _trayTrayOnlyMenu;
+    private readonly Forms.ToolStripMenuItem _trayRefreshMenu;
+    private readonly Forms.ToolStripMenuItem _trayExitMenu;
     private DockMode _dockMode = DockMode.Free;
     private WindowLayer _windowLayer = WindowLayer.Top;
+    private DisplayMode _displayMode = DisplayMode.Desktop;
+    private bool _showTrayIcon = true;
     private bool _isRefreshing;
     private bool _pendingRefresh;
     private NetworkTotals? _lastNetworkTotals;
     private CpuTimes? _lastCpuTimes;
-    private readonly Brush _locationChinaBrush;
-    private readonly Brush _locationOtherBrush;
-    private readonly Brush _locationUnknownBrush;
-    private readonly Brush _balancedStatusTextBrush = new SolidColorBrush(Color.FromRgb(0xF1, 0xF3, 0xF6));
-    private readonly Brush _lightStatusTextBrush = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF));
-    private readonly Brush _darkStatusTextBrush = new SolidColorBrush(Color.FromRgb(0x20, 0x24, 0x2A));
+    private readonly System.Windows.Media.Brush _locationChinaBrush;
+    private readonly System.Windows.Media.Brush _locationOtherBrush;
+    private readonly System.Windows.Media.Brush _locationUnknownBrush;
+    private readonly System.Windows.Media.Brush _balancedStatusTextBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF1, 0xF3, 0xF6));
+    private readonly System.Windows.Media.Brush _lightStatusTextBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xFF, 0xFF, 0xFF));
+    private readonly System.Windows.Media.Brush _darkStatusTextBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x20, 0x24, 0x2A));
     private string _currentLocationText = PlaceholderLocation;
-    private Brush _currentLocationBrush = Brushes.Transparent;
+    private System.Windows.Media.Brush _currentLocationBrush = System.Windows.Media.Brushes.Transparent;
     private string _currentDnsText = PlaceholderDns;
-    private Brush _statusTextBrush = Brushes.Transparent;
+    private System.Windows.Media.Brush _statusTextBrush = System.Windows.Media.Brushes.Transparent;
     private string _downloadSpeedValueText = "0";
     private string _downloadSpeedUnitText = "B/s";
     private string _uploadSpeedValueText = "0";
@@ -80,7 +91,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    public Brush CurrentLocationBrush
+    public System.Windows.Media.Brush CurrentLocationBrush
     {
         get => _currentLocationBrush;
         private set
@@ -103,7 +114,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    public Brush StatusTextBrush
+    public System.Windows.Media.Brush StatusTextBrush
     {
         get => _statusTextBrush;
         private set
@@ -173,9 +184,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         InitializeComponent();
         DataContext = this;
-        _locationChinaBrush = (Brush)Application.Current.FindResource("LocationChina");
-        _locationOtherBrush = (Brush)Application.Current.FindResource("LocationOther");
-        _locationUnknownBrush = (Brush)Application.Current.FindResource("LocationUnknown");
+        (_trayIcon, _trayShowWindowMenu, _trayTrayOnlyMenu, _trayRefreshMenu, _trayExitMenu) = CreateTrayIcon();
+        _locationChinaBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("LocationChina");
+        _locationOtherBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("LocationOther");
+        _locationUnknownBrush = (System.Windows.Media.Brush)System.Windows.Application.Current.FindResource("LocationUnknown");
         CurrentLocationBrush = _locationUnknownBrush;
         StatusTextBrush = _balancedStatusTextBrush;
 
@@ -215,11 +227,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             SetDockMode(_dockMode, placeDefaultFreePosition: true);
             ApplySavedWindowLayer();
+            ApplySavedTrayIconVisibility();
+            ApplySavedDisplayMode();
             ApplySavedTextTheme();
             StartupMenu.IsChecked = IsStartupEnabled();
             ApplySavedRefreshInterval();
             HighlightCurrentCalendarItems();
             UpdateSystemStats();
+            UpdateTrayText();
             _timer.Start();
             _systemStatsTimer.Start();
         };
@@ -248,6 +263,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         NetworkChange.NetworkAvailabilityChanged -= NetworkChange_NetworkAvailabilityChanged;
         _timer.Stop();
         _systemStatsTimer.Stop();
+        _trayIcon.Visible = false;
+        _trayIcon.Dispose();
         base.OnClosed(e);
     }
 
@@ -274,15 +291,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 var (location, countryCode) = ResolveLocation(ip, data.Region, data.CountryCode);
                 CurrentLocationText = location;
                 ApplyLocationBrush(countryCode, isConnected: true);
+                UpdateTrayText();
             }
             else
             {
                 HandleDisconnected();
+                UpdateTrayText();
             }
         }
         catch
         {
             HandleDisconnected();
+            UpdateTrayText();
         }
         finally
         {
@@ -503,6 +523,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DownloadSpeedUnitText = download.Unit;
         UploadSpeedValueText = upload.Value;
         UploadSpeedUnitText = upload.Unit;
+        UpdateTrayText();
     }
 
     private void UpdateCpuUsage()
@@ -520,6 +541,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             {
                 _lastCpuTimes = current;
                 CpuUsageText = "CPU 0%";
+                UpdateTrayText();
                 return;
             }
 
@@ -531,6 +553,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             CpuUsageText = $"CPU {usage:0}%";
             _lastCpuTimes = current;
+            UpdateTrayText();
         }
         catch
         {
@@ -788,6 +811,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         SaveWindowLayer(layer);
     }
 
+    private void DisplayModeMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var mode = sender == DisplayTrayOnlyMenu ? DisplayMode.TrayOnly : DisplayMode.Desktop;
+        ApplyDisplayMode(mode);
+        SaveDisplayMode(mode);
+    }
+
+    private void ShowTrayIconMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var show = ShowTrayIconMenu.IsChecked == true;
+        SetTrayIconVisibility(show);
+        SaveTrayIconVisibility(_showTrayIcon);
+    }
+
     private void TextThemeMenu_Click(object sender, RoutedEventArgs e)
     {
         var theme = sender == DarkTextMenu
@@ -840,8 +877,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         textBlock.Inlines.Add(new Run(FormatSpeed(ms))
         {
             Foreground = ms >= 0
-                ? new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50))  // Green
-                : new SolidColorBrush(Color.FromRgb(0xF4, 0x43, 0x36))  // Red
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4C, 0xAF, 0x50))  // Green
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF4, 0x43, 0x36))  // Red
         });
         item.Header = textBlock;
     }
@@ -1097,6 +1134,199 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void ApplySavedDisplayMode()
+    {
+        ApplyDisplayMode(LoadDisplayMode());
+    }
+
+    private void ApplyDisplayMode(DisplayMode mode)
+    {
+        _displayMode = mode;
+        DisplayDesktopMenu.IsChecked = mode == DisplayMode.Desktop;
+        DisplayTrayOnlyMenu.IsChecked = mode == DisplayMode.TrayOnly;
+        _trayShowWindowMenu.Checked = mode == DisplayMode.Desktop;
+        _trayTrayOnlyMenu.Checked = mode == DisplayMode.TrayOnly;
+
+        if (mode == DisplayMode.TrayOnly)
+        {
+            if (!_showTrayIcon)
+            {
+                SetTrayIconVisibility(true);
+                SaveTrayIconVisibility(true);
+            }
+
+            Hide();
+            return;
+        }
+
+        Show();
+        Activate();
+        ApplyWindowLayer();
+        ApplyTrayIconVisibility();
+    }
+
+    private static DisplayMode LoadDisplayMode()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(SettingsRegistryKey, false);
+            var value = key?.GetValue(DisplayModeValueName) as string;
+            return Enum.TryParse<DisplayMode>(value, true, out var mode) ? mode : DisplayMode.Desktop;
+        }
+        catch
+        {
+            return DisplayMode.Desktop;
+        }
+    }
+
+    private static void SaveDisplayMode(DisplayMode mode)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(SettingsRegistryKey);
+            key?.SetValue(DisplayModeValueName, mode.ToString(), RegistryValueKind.String);
+        }
+        catch
+        {
+        }
+    }
+
+    private void ApplySavedTrayIconVisibility()
+    {
+        SetTrayIconVisibility(LoadTrayIconVisibility());
+    }
+
+    private void SetTrayIconVisibility(bool show)
+    {
+        if (!show && _displayMode == DisplayMode.TrayOnly)
+        {
+            ApplyDisplayMode(DisplayMode.Desktop);
+            SaveDisplayMode(DisplayMode.Desktop);
+        }
+
+        _showTrayIcon = show;
+        ShowTrayIconMenu.IsChecked = show;
+        ApplyTrayIconVisibility();
+    }
+
+    private void ApplyTrayIconVisibility()
+    {
+        _trayIcon.Visible = _showTrayIcon || _displayMode == DisplayMode.TrayOnly;
+    }
+
+    private static bool LoadTrayIconVisibility()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(SettingsRegistryKey, false);
+            var value = key?.GetValue(ShowTrayIconValueName);
+            return value is int show ? show != 0 : true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static void SaveTrayIconVisibility(bool show)
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(SettingsRegistryKey);
+            key?.SetValue(ShowTrayIconValueName, show ? 1 : 0, RegistryValueKind.DWord);
+        }
+        catch
+        {
+        }
+    }
+
+    private (Forms.NotifyIcon Icon,
+        Forms.ToolStripMenuItem ShowWindow,
+        Forms.ToolStripMenuItem TrayOnly,
+        Forms.ToolStripMenuItem Refresh,
+        Forms.ToolStripMenuItem Exit) CreateTrayIcon()
+    {
+        var showWindow = new Forms.ToolStripMenuItem("Desktop Window") { CheckOnClick = false };
+        var trayOnly = new Forms.ToolStripMenuItem("Tray Only") { CheckOnClick = false };
+        var refresh = new Forms.ToolStripMenuItem("Force Refresh");
+        var exit = new Forms.ToolStripMenuItem("Exit");
+        var menu = new Forms.ContextMenuStrip();
+        menu.Items.Add(showWindow);
+        menu.Items.Add(trayOnly);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add(refresh);
+        menu.Items.Add(exit);
+
+        var icon = new Forms.NotifyIcon
+        {
+            Icon = LoadTrayIcon(),
+            ContextMenuStrip = menu,
+            Text = "IpShow",
+            Visible = true
+        };
+
+        showWindow.Click += (_, _) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                ApplyDisplayMode(DisplayMode.Desktop);
+                SaveDisplayMode(DisplayMode.Desktop);
+            });
+        };
+        trayOnly.Click += (_, _) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                ApplyDisplayMode(DisplayMode.TrayOnly);
+                SaveDisplayMode(DisplayMode.TrayOnly);
+            });
+        };
+        refresh.Click += async (_, _) => await Dispatcher.InvokeAsync(RefreshAsync);
+        exit.Click += (_, _) => Dispatcher.Invoke(Close);
+        icon.DoubleClick += (_, _) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                ApplyDisplayMode(DisplayMode.Desktop);
+                SaveDisplayMode(DisplayMode.Desktop);
+            });
+        };
+
+        return (icon, showWindow, trayOnly, refresh, exit);
+    }
+
+    private static Drawing.Icon LoadTrayIcon()
+    {
+        try
+        {
+            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            var icon = string.IsNullOrWhiteSpace(exePath) ? null : Drawing.Icon.ExtractAssociatedIcon(exePath);
+            if (icon is not null)
+            {
+                return icon;
+            }
+        }
+        catch
+        {
+        }
+
+        return Drawing.SystemIcons.Application;
+    }
+
+    private void UpdateTrayText()
+    {
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
+        var speed = $"↓ {DownloadSpeedValueText}{DownloadSpeedUnitText} ↑ {UploadSpeedValueText}{UploadSpeedUnitText}";
+        _trayIcon.Text = TrimTrayText($"IpShow {CurrentLocationText} {CpuUsageText} {speed}");
+    }
+
+    private static string TrimTrayText(string text)
+        => text.Length <= 63 ? text : text[..60] + "...";
+
     private void ApplySavedTextTheme()
     {
         ApplyTextTheme(LoadTextTheme());
@@ -1160,7 +1390,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (i + 1 == currentMonth)
             {
                 monthMenuItems[i].FontWeight = FontWeights.Bold;
-                monthMenuItems[i].Foreground = new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50)); // Green
+                monthMenuItems[i].Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4C, 0xAF, 0x50)); // Green
             }
         }
 
@@ -1172,7 +1402,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (i == currentDayOfWeek)
             {
                 weekdayMenuItems[i].FontWeight = FontWeights.Bold;
-                weekdayMenuItems[i].Foreground = new SolidColorBrush(Color.FromRgb(0x4C, 0xAF, 0x50)); // Green
+                weekdayMenuItems[i].Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4C, 0xAF, 0x50)); // Green
             }
         }
     }
@@ -1193,6 +1423,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Top,
         Normal,
         Bottom
+    }
+
+    private enum DisplayMode
+    {
+        Desktop,
+        TrayOnly
     }
 
     private enum TextTheme

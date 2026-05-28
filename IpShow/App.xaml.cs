@@ -3,7 +3,7 @@ using System.Windows;
 
 namespace IpShow;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     // Named mutex ensures only one IpShow instance runs per user session.
     private const string SingleInstanceMutexName = "Global\\IpShow.SingleInstance.{7B4E2F1A-3C9D-4A6B-8F12-5D9E0A1B2C3D}";

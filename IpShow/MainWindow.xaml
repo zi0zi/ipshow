@@ -5,15 +5,15 @@
         Title="IpShow"
         Icon="Assets/IpShow.ico"
         Width="176"
-        Height="38"
+        Height="42"
         MinWidth="176"
         MaxWidth="176"
-        MinHeight="38"
-        MaxHeight="38"
+        MinHeight="42"
+        MaxHeight="42"
         SizeToContent="Manual"
         WindowStyle="None"
         AllowsTransparency="False"
-        Background="#01000000"
+        Background="#01FFFFFF"
         Topmost="True"
         ShowInTaskbar="False"
         ResizeMode="NoResize"
@@ -50,6 +50,12 @@
         <MenuItem Header="Top Layer" IsCheckable="True" Name="LayerTopMenu" Click="LayerMenu_Click" />
         <MenuItem Header="Normal Layer" IsCheckable="True" Name="LayerNormalMenu" Click="LayerMenu_Click" />
         <MenuItem Header="Bottom Layer" IsCheckable="True" Name="LayerBottomMenu" Click="LayerMenu_Click" />
+      </MenuItem>
+      <MenuItem Header="Display">
+        <MenuItem Header="Desktop Window" IsCheckable="True" Name="DisplayDesktopMenu" Click="DisplayModeMenu_Click" />
+        <MenuItem Header="Tray Only" IsCheckable="True" Name="DisplayTrayOnlyMenu" Click="DisplayModeMenu_Click" />
+        <Separator />
+        <MenuItem Header="Show Tray Icon" IsCheckable="True" Name="ShowTrayIconMenu" Click="ShowTrayIconMenu_Click" />
       </MenuItem>
       <MenuItem Header="Balanced Text" IsCheckable="True" Name="BalancedTextMenu" Click="TextThemeMenu_Click" />
       <MenuItem Header="Light Text" IsCheckable="True" Name="LightTextMenu" Click="TextThemeMenu_Click" />
@@ -94,9 +100,9 @@
   <Grid>
     <!-- Single glass frame over the system acrylic backdrop -->
     <Border CornerRadius="10"
-            Background="#06000000"
-            BorderThickness="0.8"
-            BorderBrush="#22FFFFFF"
+            Background="#746B7078"
+            BorderThickness="0"
+            BorderBrush="Transparent"
             Padding="7,2">
       <Grid>
         <Grid.RowDefinitions>
@@ -106,7 +112,7 @@
         <StackPanel Orientation="Horizontal"
                     HorizontalAlignment="Center">
           <TextBlock FontFamily="Bahnschrift"
-                     FontSize="12.5"
+                     FontSize="14"
                      MaxWidth="92"
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
@@ -114,14 +120,14 @@
                      MouseLeftButtonDown="CurrentIpText_MouseLeftButtonDown">
             <Hyperlink Click="AddressLink_Click"
                        Tag="{Binding CurrentLocationText, Mode=OneWay}"
-                       Foreground="{Binding CurrentLocationBrush, Mode=OneWay}"
+                       Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                        TextDecorations="{x:Null}">
               <Run Text="{Binding CurrentLocationText, Mode=OneWay}" />
             </Hyperlink>
           </TextBlock>
           <TextBlock Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      Margin="12,1,0,0"
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
@@ -133,49 +139,49 @@
               Margin="0,0,0,0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="10" />
-            <ColumnDefinition Width="36" />
-            <ColumnDefinition Width="24" />
-            <ColumnDefinition Width="12" />
+            <ColumnDefinition Width="38" />
+            <ColumnDefinition Width="25" />
             <ColumnDefinition Width="10" />
-            <ColumnDefinition Width="36" />
-            <ColumnDefinition Width="24" />
+            <ColumnDefinition Width="10" />
+            <ColumnDefinition Width="38" />
+            <ColumnDefinition Width="25" />
           </Grid.ColumnDefinitions>
           <TextBlock Grid.Column="0"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      Effect="{StaticResource TextGlow}"
                      Text="↓" />
           <TextBlock Grid.Column="1"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      TextAlignment="Right"
                      Effect="{StaticResource TextGlow}"
                      Text="{Binding DownloadSpeedValueText, Mode=OneWay}" />
           <TextBlock Grid.Column="2"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      Effect="{StaticResource TextGlow}"
                      Text="{Binding DownloadSpeedUnitText, Mode=OneWay}" />
           <TextBlock Grid.Column="4"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      Effect="{StaticResource TextGlow}"
                      Text="↑" />
           <TextBlock Grid.Column="5"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      TextAlignment="Right"
                      Effect="{StaticResource TextGlow}"
                      Text="{Binding UploadSpeedValueText, Mode=OneWay}" />
           <TextBlock Grid.Column="6"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
-                     FontSize="10"
+                     FontSize="11"
                      Effect="{StaticResource TextGlow}"
                      Text="{Binding UploadSpeedUnitText, Mode=OneWay}" />
         </Grid>
@@ -183,3 +189,4 @@
     </Border>
   </Grid>
 </Window>
+

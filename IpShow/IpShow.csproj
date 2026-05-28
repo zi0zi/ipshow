@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>Assets\IpShow.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
