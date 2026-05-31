@@ -44,6 +44,7 @@ packages/
 *.sqlite3
 *.db-shm
 *.db-wal
+*.mmdb
 *.cache/
 *.tmp/
 
@@ -102,6 +103,7 @@ node_modules/
 # ================================
 #   AI / Tool specific
 # ================================
+.claude/
 .gemini/
 .kiro/
 

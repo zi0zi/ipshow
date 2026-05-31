@@ -14,7 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Assets\IpShow.ico" />
-    <None Include="GeoIP\GeoLite2-City.mmdb">
+    <None Include="GeoIP\GeoLite2-City.mmdb" Condition="Exists('GeoIP\GeoLite2-City.mmdb')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
