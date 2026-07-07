@@ -78,6 +78,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _uploadSpeedUnitText = "B/s";
     private string _cpuUsageText = "CPU --";
     private string _currentPublicIp = string.Empty;
+    private string _ramUsageText = "RAM --";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -178,6 +179,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (_cpuUsageText == value) return;
             _cpuUsageText = value;
             OnPropertyChanged(nameof(CpuUsageText));
+        }
+    }
+
+    public string RamUsageText
+    {
+        get => _ramUsageText;
+        private set
+        {
+            if (_ramUsageText == value) return;
+            _ramUsageText = value;
+            OnPropertyChanged(nameof(RamUsageText));
         }
     }
 
@@ -488,6 +500,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         UpdateNetworkSpeed();
         UpdateCpuUsage();
+        UpdateRamUsage();
+    }
+
+    private void UpdateRamUsage()
+    {
+        try
+        {
+            var status = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+            RamUsageText = GlobalMemoryStatusEx(ref status) ? $"RAM {status.dwMemoryLoad}%" : "RAM --";
+        }
+        catch
+        {
+            RamUsageText = "RAM --";
+        }
     }
 
     private void UpdateNetworkSpeed()
@@ -1362,7 +1388,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var speed = $"↓ {DownloadSpeedValueText}{DownloadSpeedUnitText} ↑ {UploadSpeedValueText}{UploadSpeedUnitText}";
-        _trayIcon.Text = TrimTrayText($"IpShow {CurrentLocationText} {CpuUsageText} {speed}");
+        _trayIcon.Text = TrimTrayText($"IpShow {CurrentLocationText} {CpuUsageText} {RamUsageText} {speed}");
     }
 
     private static string TrimTrayText(string text)
@@ -1496,6 +1522,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetSystemTimes(out FileTime idleTime, out FileTime kernelTime, out FileTime userTime);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatusEx
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
 
     private static readonly IntPtr HwndTopMost = new(-1);
     private static readonly IntPtr HwndNoTopMost = new(-2);

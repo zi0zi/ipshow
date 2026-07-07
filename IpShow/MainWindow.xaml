@@ -116,7 +116,7 @@
                     HorizontalAlignment="Center">
           <TextBlock FontFamily="Bahnschrift"
                      FontSize="14"
-                     MaxWidth="92"
+                     MaxWidth="76"
                      Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
@@ -128,6 +128,13 @@
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
                      Text="{Binding CpuUsageText, Mode=OneWay}" />
+          <TextBlock Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="11"
+                     Margin="8,1,0,0"
+                     Effect="{StaticResource TextGlow}"
+                     TextTrimming="CharacterEllipsis"
+                     Text="{Binding RamUsageText, Mode=OneWay}" />
         </StackPanel>
         <Grid Grid.Row="1"
               Width="136"
