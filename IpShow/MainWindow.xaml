@@ -114,17 +114,10 @@
           <TextBlock FontFamily="Bahnschrift"
                      FontSize="14"
                      MaxWidth="92"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
-                     Cursor="Hand"
-                     MouseLeftButtonDown="CurrentIpText_MouseLeftButtonDown">
-            <Hyperlink Click="AddressLink_Click"
-                       Tag="{Binding CurrentLocationText, Mode=OneWay}"
-                       Foreground="{Binding StatusTextBrush, Mode=OneWay}"
-                       TextDecorations="{x:Null}">
-              <Run Text="{Binding CurrentLocationText, Mode=OneWay}" />
-            </Hyperlink>
-          </TextBlock>
+                     Text="{Binding CurrentLocationText, Mode=OneWay}" />
           <TextBlock Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
                      FontSize="11"

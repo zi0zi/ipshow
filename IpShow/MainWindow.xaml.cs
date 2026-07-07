@@ -785,8 +785,15 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
-    private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private async void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // 双击任意处 = 强制刷新（替代旧的单击刷新，避免误触）。
+        if (e.ClickCount == 2)
+        {
+            await RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1));
+            return;
+        }
+
         if (_dockMode != DockMode.Free)
         {
             return;
@@ -906,9 +913,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         });
         item.Header = textBlock;
     }
-
-    private async void CurrentIpText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        => await RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1));
 
     private void RefreshIntervalMenu_Click(object sender, RoutedEventArgs e)
     {
