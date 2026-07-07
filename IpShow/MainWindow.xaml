@@ -34,6 +34,7 @@
       <Separator />
       <MenuItem Header="IP 查询网站" Name="IpLookupMenu" Click="IpLookupMenu_Click" />
       <MenuItem Header="地图查询归属地" Name="MapLookupMenu" Click="MapLookupMenu_Click" />
+      <MenuItem Header="下载城市库 (GeoLite2)" Name="DownloadGeoDbMenu" Click="DownloadGeoDbMenu_Click" />
       <Separator />
       <MenuItem Header="Google: -" Name="PingGoogleMenu" />
       <MenuItem Header="Baidu: -" Name="PingBaiduMenu" />

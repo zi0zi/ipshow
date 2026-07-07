@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!--
+    IpShow MSI installer.
+    Build with installer/build.ps1 (which publishes a self-contained build first).
+    $(var.PublishDir) and $(var.ProductVersion) are passed on the command line.
+  -->
+  <Package Name="IpShow"
+           Manufacturer="APEC"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="B53213BF-D50D-441D-A0D4-D7B5E1EED738"
+           Scope="perMachine"
+           Codepage="65001"
+           Compressed="yes">
+
+    <!-- Block downgrades and replace older versions cleanly on install. -->
+    <MajorUpgrade DowngradeErrorMessage="已安装更高版本的 [ProductName]，安装程序将退出。" />
+
+    <!-- Single embedded compressed cab. -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Icon for Add/Remove Programs and shortcuts (extracted from the exe). -->
+    <Icon Id="IpShowIcon" SourceFile="$(var.PublishDir)\IpShow.exe" />
+    <Property Id="ARPPRODUCTICON" Value="IpShowIcon" />
+
+    <!-- Install into Program Files\IpShow (64-bit). -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="IpShow" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppProgramMenuDir" Name="IpShow" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Feature Id="Main" Title="IpShow" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="AppShortcuts" />
+    </Feature>
+
+    <!-- Wizard: Welcome -> License -> Install dir -> Ready -> Finish. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+  </Package>
+
+  <!-- Harvest every file produced by dotnet publish into the install folder. -->
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Start Menu shortcut; removed with the component on uninstall. -->
+  <Fragment>
+    <Component Id="AppShortcuts" Directory="AppProgramMenuDir" Guid="*">
+      <Shortcut Id="StartMenuShortcut"
+                Name="IpShow"
+                Description="显示公网 IP、网速与 CPU 的桌面小工具"
+                Target="[INSTALLFOLDER]IpShow.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="IpShowIcon" />
+      <Shortcut Id="DesktopShortcut"
+                Directory="DesktopFolder"
+                Name="IpShow"
+                Description="显示公网 IP、网速与 CPU 的桌面小工具"
+                Target="[INSTALLFOLDER]IpShow.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="IpShowIcon" />
+      <RemoveFolder Id="RemoveAppProgramMenuDir" Directory="AppProgramMenuDir" On="uninstall" />
+      <RegistryValue Root="HKMU"
+                     Key="Software\IpShow"
+                     Name="Installed"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+</Wix>

@@ -42,8 +42,16 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int DefaultRefreshSeconds = 10;
     // 右下角一般有输入法/状态栏图标，比普通停靠多留约 30px 边距。
     private const double BottomRightEdgeMargin = 42;
-    private static readonly string GeoCityDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
-    private static readonly Lazy<DatabaseReader?> GeoCityReader = new(() => CreateGeoReader(GeoCityDbPath));
+    // Public mirror of GeoLite2 City (updated daily). Downloaded on demand from the right-click menu.
+    private const string GeoDbDownloadUrl = "https://raw.githubusercontent.com/P3TERX/GeoLite.mmdb/download/GeoLite2-City.mmdb";
+    // Prefer a user-writable copy (works even when installed under Program Files);
+    // fall back to a copy shipped next to the exe (portable / dev builds).
+    private static readonly string UserGeoDbPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "IpShow", "GeoIP", "GeoLite2-City.mmdb");
+    private static readonly string BundledGeoDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
+    private static DatabaseReader? _geoCityReader;
+    private static bool _geoCityReaderInitialized;
     private static readonly HttpClient Http = new()
     {
         Timeout = TimeSpan.FromSeconds(6)
@@ -81,6 +89,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _cpuUsageText = "CPU --";
     private string _currentPublicIp = string.Empty;
     private string _ramUsageText = "RAM --";
+    private bool _isDownloadingGeoDb;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -641,6 +650,26 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         return new CpuTimes(idle, kernel + user);
     }
 
+    private static string ResolveGeoDbPath() => File.Exists(UserGeoDbPath) ? UserGeoDbPath : BundledGeoDbPath;
+
+    private static DatabaseReader? GetGeoReader()
+    {
+        if (!_geoCityReaderInitialized)
+        {
+            _geoCityReader = CreateGeoReader(ResolveGeoDbPath());
+            _geoCityReaderInitialized = true;
+        }
+
+        return _geoCityReader;
+    }
+
+    private static void ReloadGeoReader()
+    {
+        try { _geoCityReader?.Dispose(); } catch { }
+        _geoCityReader = CreateGeoReader(ResolveGeoDbPath());
+        _geoCityReaderInitialized = true;
+    }
+
     private static DatabaseReader? CreateGeoReader(string path)
     {
         try
@@ -669,14 +698,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     private static (string? Location, string? CountryCode) TryResolveFromCityDb(IPAddress address)
     {
-        if (GeoCityReader.Value is null)
+        if (GetGeoReader() is not { } reader)
         {
             return (null, null);
         }
 
         try
         {
-            var response = GeoCityReader.Value.City(address);
+            var response = reader.City(address);
             var iso = response?.Country?.IsoCode;
             var region = NormalizeLocation(response?.MostSpecificSubdivision?.Name);
             if (region != "-")
@@ -842,6 +871,61 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         catch
         {
+        }
+    }
+
+    private void ShowTrayBalloon(string title, string message)
+    {
+        try
+        {
+            _trayIcon.ShowBalloonTip(4000, "IpShow · " + title, message, Forms.ToolTipIcon.Info);
+        }
+        catch
+        {
+        }
+    }
+
+    private async void DownloadGeoDbMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isDownloadingGeoDb)
+        {
+            return;
+        }
+
+        _isDownloadingGeoDb = true;
+        ShowTrayBalloon("城市库", "开始下载 GeoLite2 城市库（约 66MB）…");
+        try
+        {
+            var dir = Path.GetDirectoryName(UserGeoDbPath)!;
+            Directory.CreateDirectory(dir);
+            var tempPath = UserGeoDbPath + ".download";
+
+            using (var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+            using (var resp = await client.GetAsync(GeoDbDownloadUrl, HttpCompletionOption.ResponseHeadersRead))
+            {
+                resp.EnsureSuccessStatusCode();
+                await using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await resp.Content.CopyToAsync(fs);
+            }
+
+            // Release any handle on the existing file before replacing it.
+            try { _geoCityReader?.Dispose(); } catch { }
+            _geoCityReader = null;
+            _geoCityReaderInitialized = false;
+
+            File.Move(tempPath, UserGeoDbPath, overwrite: true);
+            ReloadGeoReader();
+
+            ShowTrayBalloon("城市库", "下载完成，已启用本地归属地解析。");
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowTrayBalloon("城市库", "下载失败：" + ex.Message);
+        }
+        finally
+        {
+            _isDownloadingGeoDb = false;
         }
     }
 

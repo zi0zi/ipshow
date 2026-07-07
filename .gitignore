@@ -139,3 +139,6 @@ Icon?
 # ================================
 # End of file
 # ================================
+
+# Installer build output
+installer/dist/
