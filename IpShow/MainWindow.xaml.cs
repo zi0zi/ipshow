@@ -40,6 +40,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const string ShowTrayIconValueName = "ShowTrayIcon";
     private const string TextThemeValueName = "TextTheme";
     private const int DefaultRefreshSeconds = 10;
+    // 右下角一般有输入法/状态栏图标，比普通停靠多留约 30px 边距。
+    private const double BottomRightEdgeMargin = 42;
     private static readonly string GeoCityDbPath = Path.Combine(AppContext.BaseDirectory, "GeoIP", "GeoLite2-City.mmdb");
     private static readonly Lazy<DatabaseReader?> GeoCityReader = new(() => CreateGeoReader(GeoCityDbPath));
     private static readonly HttpClient Http = new()
@@ -1043,20 +1045,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            Left = leftRight;
-            Top = workArea.Bottom - Height - edgeMargin;
+            // BottomRight：右下角避开输入法/状态栏，右、下各多留约 30px。
+            Left = workArea.Right - Width - BottomRightEdgeMargin;
+            Top = workArea.Bottom - Height - BottomRightEdgeMargin;
         }
     }
 
     private void PlaceDefaultFreePosition()
     {
+        // 默认启动落在右下角（与 Dock Bottom Right 相同的安全边距），仍保持自由拖动。
         var workArea = SystemParameters.WorkArea;
-        const double rightInset = 260;
-        const double topInset = 88;
         const double minMargin = 24;
 
-        Left = Math.Max(workArea.Left + minMargin, workArea.Right - Width - rightInset);
-        Top = Math.Min(workArea.Bottom - Height - minMargin, workArea.Top + topInset);
+        Left = Math.Max(workArea.Left + minMargin, workArea.Right - Width - BottomRightEdgeMargin);
+        Top = Math.Max(workArea.Top + minMargin, workArea.Bottom - Height - BottomRightEdgeMargin);
     }
 
     private static bool IsStartupEnabled()
