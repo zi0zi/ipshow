@@ -77,6 +77,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _uploadSpeedValueText = "0";
     private string _uploadSpeedUnitText = "B/s";
     private string _cpuUsageText = "CPU --";
+    private string _currentPublicIp = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -288,6 +289,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var data = await FetchIpDataAsync();
             if (data.Ip is { Length: > 0 } ip)
             {
+                NotifyIfPublicIpChanged(ip);
+                _currentPublicIp = ip;
                 var (location, countryCode) = ResolveLocation(ip, data.Region, data.CountryCode);
                 CurrentLocationText = location;
                 ApplyLocationBrush(countryCode, isConnected: true);
@@ -705,6 +708,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return value.Trim().Equals("unknown", StringComparison.OrdinalIgnoreCase) ? "-" : value.Trim();
+    }
+
+    private void NotifyIfPublicIpChanged(string newIp)
+    {
+        // 首次获取（旧值为空）不提醒；仅当已有旧值且发生变化时弹一次托盘气泡。
+        if (string.IsNullOrEmpty(_currentPublicIp) || _currentPublicIp == newIp)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowBalloonTip(
+                3000,
+                "IpShow",
+                $"公网 IP 变化：{_currentPublicIp} → {newIp}",
+                Forms.ToolTipIcon.Info);
+        }
+        catch
+        {
+        }
     }
 
     private void HandleDisconnected()
