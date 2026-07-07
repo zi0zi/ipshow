@@ -885,6 +885,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    // Reflect the current city-database state in the menu header whenever the menu opens
+    // (skipped while a download is in progress so it doesn't overwrite the live percentage).
+    private void UpdateGeoDbMenuState()
+    {
+        if (_isDownloadingGeoDb)
+        {
+            return;
+        }
+
+        DownloadGeoDbMenu.Header = File.Exists(UserGeoDbPath)
+            ? "城市库：已安装 ✓（点击可更新）"
+            : "下载城市库 (GeoLite2)";
+    }
+
     private async void DownloadGeoDbMenu_Click(object sender, RoutedEventArgs e)
     {
         if (_isDownloadingGeoDb)
@@ -893,6 +907,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         _isDownloadingGeoDb = true;
+        DownloadGeoDbMenu.Header = "下载城市库… 0%";
         ShowTrayBalloon("城市库", "开始下载 GeoLite2 城市库（约 66MB）…");
         try
         {
@@ -904,8 +919,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             using (var resp = await client.GetAsync(GeoDbDownloadUrl, HttpCompletionOption.ResponseHeadersRead))
             {
                 resp.EnsureSuccessStatusCode();
+                var total = resp.Content.Headers.ContentLength ?? -1L;
+                await using var src = await resp.Content.ReadAsStreamAsync();
                 await using var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await resp.Content.CopyToAsync(fs);
+
+                var buffer = new byte[81920];
+                long received = 0;
+                var lastPct = -1;
+                int read;
+                while ((read = await src.ReadAsync(buffer)) > 0)
+                {
+                    await fs.WriteAsync(buffer.AsMemory(0, read));
+                    received += read;
+
+                    // Continuations resume on the UI thread, so touching the menu header is safe.
+                    if (total > 0)
+                    {
+                        var pct = (int)(received * 100 / total);
+                        if (pct != lastPct)
+                        {
+                            lastPct = pct;
+                            DownloadGeoDbMenu.Header = $"下载城市库… {pct}%";
+                        }
+                    }
+                    else
+                    {
+                        DownloadGeoDbMenu.Header = $"下载城市库… {received / (1024 * 1024)}MB";
+                    }
+                }
             }
 
             // Release any handle on the existing file before replacing it.
@@ -916,11 +957,13 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             File.Move(tempPath, UserGeoDbPath, overwrite: true);
             ReloadGeoReader();
 
+            DownloadGeoDbMenu.Header = "城市库：已安装 ✓（点击可更新）";
             ShowTrayBalloon("城市库", "下载完成，已启用本地归属地解析。");
             await RefreshAsync();
         }
         catch (Exception ex)
         {
+            DownloadGeoDbMenu.Header = "下载城市库 (GeoLite2) — 失败，点击重试";
             ShowTrayBalloon("城市库", "下载失败：" + ex.Message);
         }
         finally
@@ -1019,6 +1062,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         try { UpdateDns(); } catch { }
         try { UpdateGateway(); } catch { }
+        try { UpdateGeoDbMenuState(); } catch { }
 
         // Show loading state
         PingGoogleMenu.Header = "Google: ...";
