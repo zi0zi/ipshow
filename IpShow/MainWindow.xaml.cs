@@ -726,6 +726,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void UpdateGateway()
+    {
+        try
+        {
+            var gateway = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up
+                              && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .SelectMany(nic => nic.GetIPProperties().GatewayAddresses)
+                .Select(g => g?.Address)
+                .FirstOrDefault(addr => addr is { AddressFamily: System.Net.Sockets.AddressFamily.InterNetwork });
+
+            GatewayMenu.Header = gateway is null ? "Gateway —" : $"Gateway {gateway}";
+        }
+        catch
+        {
+            GatewayMenu.Header = "Gateway —";
+        }
+    }
+
     private static string NormalizeLocation(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -913,6 +932,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void ContextMenu_Opened(object sender, RoutedEventArgs e)
     {
         try { UpdateDns(); } catch { }
+        try { UpdateGateway(); } catch { }
 
         // Show loading state
         PingGoogleMenu.Header = "Google: ...";

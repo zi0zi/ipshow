@@ -30,6 +30,7 @@
   <Window.ContextMenu>
     <ContextMenu Opened="ContextMenu_Opened">
       <MenuItem Header="DNS —" Name="DnsMenu" />
+      <MenuItem Header="Gateway —" Name="GatewayMenu" />
       <Separator />
       <MenuItem Header="IP 查询网站" Name="IpLookupMenu" Click="IpLookupMenu_Click" />
       <MenuItem Header="地图查询归属地" Name="MapLookupMenu" Click="MapLookupMenu_Click" />
