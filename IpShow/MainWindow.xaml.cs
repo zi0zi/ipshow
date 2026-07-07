@@ -77,6 +77,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private string _uploadSpeedValueText = "0";
     private string _uploadSpeedUnitText = "B/s";
     private string _cpuUsageText = "CPU --";
+    private string _currentPublicIp = string.Empty;
+    private string _ramUsageText = "RAM --";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -177,6 +179,17 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             if (_cpuUsageText == value) return;
             _cpuUsageText = value;
             OnPropertyChanged(nameof(CpuUsageText));
+        }
+    }
+
+    public string RamUsageText
+    {
+        get => _ramUsageText;
+        private set
+        {
+            if (_ramUsageText == value) return;
+            _ramUsageText = value;
+            OnPropertyChanged(nameof(RamUsageText));
         }
     }
 
@@ -288,6 +301,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             var data = await FetchIpDataAsync();
             if (data.Ip is { Length: > 0 } ip)
             {
+                NotifyIfPublicIpChanged(ip);
+                _currentPublicIp = ip;
                 var (location, countryCode) = ResolveLocation(ip, data.Region, data.CountryCode);
                 CurrentLocationText = location;
                 ApplyLocationBrush(countryCode, isConnected: true);
@@ -485,6 +500,20 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         UpdateNetworkSpeed();
         UpdateCpuUsage();
+        UpdateRamUsage();
+    }
+
+    private void UpdateRamUsage()
+    {
+        try
+        {
+            var status = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+            RamUsageText = GlobalMemoryStatusEx(ref status) ? $"RAM {status.dwMemoryLoad}%" : "RAM --";
+        }
+        catch
+        {
+            RamUsageText = "RAM --";
+        }
     }
 
     private void UpdateNetworkSpeed()
@@ -697,6 +726,25 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
+    private void UpdateGateway()
+    {
+        try
+        {
+            var gateway = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == OperationalStatus.Up
+                              && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .SelectMany(nic => nic.GetIPProperties().GatewayAddresses)
+                .Select(g => g?.Address)
+                .FirstOrDefault(addr => addr is { AddressFamily: System.Net.Sockets.AddressFamily.InterNetwork });
+
+            GatewayMenu.Header = gateway is null ? "Gateway —" : $"Gateway {gateway}";
+        }
+        catch
+        {
+            GatewayMenu.Header = "Gateway —";
+        }
+    }
+
     private static string NormalizeLocation(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -705,6 +753,27 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         return value.Trim().Equals("unknown", StringComparison.OrdinalIgnoreCase) ? "-" : value.Trim();
+    }
+
+    private void NotifyIfPublicIpChanged(string newIp)
+    {
+        // 首次获取（旧值为空）不提醒；仅当已有旧值且发生变化时弹一次托盘气泡。
+        if (string.IsNullOrEmpty(_currentPublicIp) || _currentPublicIp == newIp)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowBalloonTip(
+                3000,
+                "IpShow",
+                $"公网 IP 变化：{_currentPublicIp} → {newIp}",
+                Forms.ToolTipIcon.Info);
+        }
+        catch
+        {
+        }
     }
 
     private void HandleDisconnected()
@@ -744,25 +813,45 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void AddressLink_Click(object sender, RoutedEventArgs e)
+    private void IpLookupMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Hyperlink hyperlink)
-        {
-            return;
-        }
-
-        var location = hyperlink.Tag as string;
-        if (string.IsNullOrWhiteSpace(location) || location == "-")
-        {
-            return;
-        }
-
-        var url = $"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(location)}";
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        var url = string.IsNullOrWhiteSpace(_currentPublicIp)
+            ? "https://ipinfo.io"
+            : $"https://ipinfo.io/{_currentPublicIp}";
+        OpenUrl(url);
     }
 
-    private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void MapLookupMenu_Click(object sender, RoutedEventArgs e)
     {
+        var location = CurrentLocationText;
+        if (string.IsNullOrWhiteSpace(location) || location == "-" || location == PlaceholderLocation)
+        {
+            return;
+        }
+
+        OpenUrl($"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(location)}");
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+        }
+    }
+
+    private async void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // 双击任意处 = 强制刷新（替代旧的单击刷新，避免误触）。
+        if (e.ClickCount == 2)
+        {
+            await RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1));
+            return;
+        }
+
         if (_dockMode != DockMode.Free)
         {
             return;
@@ -843,6 +932,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private async void ContextMenu_Opened(object sender, RoutedEventArgs e)
     {
         try { UpdateDns(); } catch { }
+        try { UpdateGateway(); } catch { }
 
         // Show loading state
         PingGoogleMenu.Header = "Google: ...";
@@ -882,9 +972,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         });
         item.Header = textBlock;
     }
-
-    private async void CurrentIpText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        => await RefreshWithRetriesAsync(2, TimeSpan.FromSeconds(1));
 
     private void RefreshIntervalMenu_Click(object sender, RoutedEventArgs e)
     {
@@ -1321,7 +1408,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
 
         var speed = $"↓ {DownloadSpeedValueText}{DownloadSpeedUnitText} ↑ {UploadSpeedValueText}{UploadSpeedUnitText}";
-        _trayIcon.Text = TrimTrayText($"IpShow {CurrentLocationText} {CpuUsageText} {speed}");
+        _trayIcon.Text = TrimTrayText($"IpShow {CurrentLocationText} {CpuUsageText} {RamUsageText} {speed}");
     }
 
     private static string TrimTrayText(string text)
@@ -1455,6 +1542,24 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetSystemTimes(out FileTime idleTime, out FileTime kernelTime, out FileTime userTime);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatusEx
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
 
     private static readonly IntPtr HwndTopMost = new(-1);
     private static readonly IntPtr HwndNoTopMost = new(-2);

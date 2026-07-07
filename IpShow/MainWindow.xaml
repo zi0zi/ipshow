@@ -30,6 +30,10 @@
   <Window.ContextMenu>
     <ContextMenu Opened="ContextMenu_Opened">
       <MenuItem Header="DNS —" Name="DnsMenu" />
+      <MenuItem Header="Gateway —" Name="GatewayMenu" />
+      <Separator />
+      <MenuItem Header="IP 查询网站" Name="IpLookupMenu" Click="IpLookupMenu_Click" />
+      <MenuItem Header="地图查询归属地" Name="MapLookupMenu" Click="MapLookupMenu_Click" />
       <Separator />
       <MenuItem Header="Google: -" Name="PingGoogleMenu" />
       <MenuItem Header="Baidu: -" Name="PingBaiduMenu" />
@@ -113,18 +117,11 @@
                     HorizontalAlignment="Center">
           <TextBlock FontFamily="Bahnschrift"
                      FontSize="14"
-                     MaxWidth="92"
+                     MaxWidth="76"
+                     Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
-                     Cursor="Hand"
-                     MouseLeftButtonDown="CurrentIpText_MouseLeftButtonDown">
-            <Hyperlink Click="AddressLink_Click"
-                       Tag="{Binding CurrentLocationText, Mode=OneWay}"
-                       Foreground="{Binding StatusTextBrush, Mode=OneWay}"
-                       TextDecorations="{x:Null}">
-              <Run Text="{Binding CurrentLocationText, Mode=OneWay}" />
-            </Hyperlink>
-          </TextBlock>
+                     Text="{Binding CurrentLocationText, Mode=OneWay}" />
           <TextBlock Foreground="{Binding StatusTextBrush, Mode=OneWay}"
                      FontFamily="Cascadia Mono, Consolas, Bahnschrift"
                      FontSize="11"
@@ -132,6 +129,13 @@
                      Effect="{StaticResource TextGlow}"
                      TextTrimming="CharacterEllipsis"
                      Text="{Binding CpuUsageText, Mode=OneWay}" />
+          <TextBlock Foreground="{Binding StatusTextBrush, Mode=OneWay}"
+                     FontFamily="Cascadia Mono, Consolas, Bahnschrift"
+                     FontSize="11"
+                     Margin="8,1,0,0"
+                     Effect="{StaticResource TextGlow}"
+                     TextTrimming="CharacterEllipsis"
+                     Text="{Binding RamUsageText, Mode=OneWay}" />
         </StackPanel>
         <Grid Grid.Row="1"
               Width="136"
