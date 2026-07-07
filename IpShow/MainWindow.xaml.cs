@@ -768,21 +768,34 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         }
     }
 
-    private void AddressLink_Click(object sender, RoutedEventArgs e)
+    private void IpLookupMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Hyperlink hyperlink)
+        var url = string.IsNullOrWhiteSpace(_currentPublicIp)
+            ? "https://ipinfo.io"
+            : $"https://ipinfo.io/{_currentPublicIp}";
+        OpenUrl(url);
+    }
+
+    private void MapLookupMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var location = CurrentLocationText;
+        if (string.IsNullOrWhiteSpace(location) || location == "-" || location == PlaceholderLocation)
         {
             return;
         }
 
-        var location = hyperlink.Tag as string;
-        if (string.IsNullOrWhiteSpace(location) || location == "-")
-        {
-            return;
-        }
+        OpenUrl($"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(location)}");
+    }
 
-        var url = $"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(location)}";
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+        }
     }
 
     private async void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
